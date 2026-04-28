@@ -1,0 +1,25 @@
+# Dart / Flutter
+.dart_tool/
+.flutter-plugins-dependencies
+.packages
+.pub/
+.pub-cache/
+build/
+coverage/
+doc/api/
+
+# IDE / Editor
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# Logs / temp
+*.log
+*.tmp
+*.swp

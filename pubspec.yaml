@@ -1,0 +1,28 @@
+name: axis
+description: Axis VPN client for Windows.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.5
+
+dependencies:
+  flutter:
+    sdk: flutter
+  path: ^1.8.3
+  http: ^1.6.0
+  flutter_colorpicker: ^1.1.0
+  system_tray: ^2.0.3
+  url_launcher: ^6.3.2
+  country_flags: ^4.1.2
+
+dev_dependencies:
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/bin/mihomo.exe
+    - assets/bin/wintun.dll
+    - assets/shield.ico
+    - assets/shield.png
