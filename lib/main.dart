@@ -867,7 +867,7 @@ $notifier.Show($toast)
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: () async {
-          final Uri url = Uri.parse('https://github.com/PavelShilov/Axis'); 
+          final Uri url = Uri.parse('https://github.com/swzxu/axis'); 
           if (!await launchUrl(url)) debugPrint("Error launch url");
         },
         child: Padding(
