@@ -1,4 +1,4 @@
-# Axis
+# ![Axis](https://raw.githubusercontent.com/swzxu/Axis/refs/heads/main/banner.png)
 
 Axis is a Flutter proxy client powered by Mihomo.
 
