@@ -8,7 +8,7 @@ $ErrorActionPreference = "Stop"
 Write-Host "Axis release build (Windows)" -ForegroundColor Cyan
 
 $args = @("build", "windows", "--release")
-if ($BuildName -ыne "") {
+if ($BuildName -ne "") {
     $args += "--build-name=$BuildName"
 }
 if ($BuildNumber -ne "") {
