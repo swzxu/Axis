@@ -2,7 +2,7 @@
 
 **Axis** is a lightweight and intuitive Flutter-based proxy client powered by the **Mihomo** (Clash) core.
 
-![Home page](https://raw.githubusercontent.com/swzxu/Axis/refs/heads/main/Axis%202_b1.png)
+![Home page](https://raw.githubusercontent.com/swzxu/Axis/refs/heads/main/Axis_b1.png)
 
 ## ✨ Features
 * **Subscription Management:** Easy import and update of your proxy configurations.
