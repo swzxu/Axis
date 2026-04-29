@@ -1,6 +1,6 @@
 param(
-    [string]$BuildName = "",
-    [string]$BuildNumber = ""
+    [string]$BuildName = "Axis",
+    [string]$BuildNumber = "1.2.1"
 )
 
 $ErrorActionPreference = "Stop"
