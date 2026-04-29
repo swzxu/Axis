@@ -18,6 +18,8 @@ doc/api/
 # Windows
 Thumbs.db
 Desktop.ini
+LICENSE
+README.md
 
 # Logs / temp
 *.log

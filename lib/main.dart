@@ -458,7 +458,7 @@ class _MainNavigationState extends State<MainNavigation> {
 
   Future<void> _initSystemTray() async {
     try {
-      final iconPath = _trayIconPath(Platform.isWindows ? 'assets/shield.ico' : 'assets/shield.png');
+      final iconPath = _trayIconPath(Platform.isWindows ? 'assets/tray_disconnected.ico' : 'assets/tray_disconnected.ico');
       if (iconPath == null) return;
       await _systemTray.initSystemTray(title: "Axis VPN", iconPath: iconPath);
       await _updateTrayMenu();
@@ -473,8 +473,8 @@ class _MainNavigationState extends State<MainNavigation> {
   }
 
   Future<void> _updateTrayIcon() async {
-    final connectedIcon = _trayIconPath(Platform.isWindows ? 'assets/shield.ico' : 'assets/shield.png');
-    final disconnectedIcon = _trayIconPath(Platform.isWindows ? 'assets/shield.ico' : 'assets/shield.png');
+    final connectedIcon = _trayIconPath('assets/tray_connected.ico');
+    final disconnectedIcon = _trayIconPath('assets/tray_disconnected.ico');
     if (connectedIcon == null || disconnectedIcon == null) return;
     await _systemTray.setImage(_isConnected ? connectedIcon : disconnectedIcon);
   }
@@ -880,8 +880,8 @@ $notifier.Show($toast)
             ),
             const SizedBox(width: 16),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text("Axis VPN Client", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-              Text("Version 1.2.0 • GitHub Project", style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
+              const Text("Axis", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              Text("Version 1.2.1", style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
               Text(s.author, style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
             ])),
             const Icon(Icons.open_in_new_rounded, size: 20),
