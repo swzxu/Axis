@@ -1,6 +1,6 @@
 param(
     [string]$BuildName = "Axis",
-    [string]$BuildNumber = "1.2.1"
+    [string]$BuildNumber = "1.3.0"
 )
 
 $ErrorActionPreference = "Stop"
@@ -8,7 +8,7 @@ $ErrorActionPreference = "Stop"
 Write-Host "Axis release build (Windows)" -ForegroundColor Cyan
 
 $args = @("build", "windows", "--release")
-if ($BuildName -ne "") {
+if ($BuildName -ыne "") {
     $args += "--build-name=$BuildName"
 }
 if ($BuildNumber -ne "") {

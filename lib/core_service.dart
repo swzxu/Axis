@@ -63,7 +63,7 @@ class CoreSettings {
 }
 
 class CoreService {
-  String currentMode = "РЎРёСЃС‚РµРјРЅС‹Р№ РїСЂРѕРєСЃРё";
+  String currentMode = "Системный прокси";
   List<Map<String, String>> _serversData = []; 
   List<Map<String, dynamic>> _subscriptions = [];
   String? _selectedServerName;
@@ -102,7 +102,7 @@ class CoreService {
 
 
   Future<bool> initAndStart() async {
-    debugPrint("Р—Р°РїСѓСЃРє СЏРґСЂР° Mihomo...");
+    debugPrint("Запуск ядра Mihomo...");
     if (_selectedServerLink == null) {
       final servers = await getServers();
       if (servers.isNotEmpty) {
@@ -111,20 +111,20 @@ class CoreService {
     }
     final generated = await _generateMihomoConfig();
     if (!generated) {
-      debugPrint("РќРµ СѓРґР°Р»РѕСЃСЊ СЃРіРµРЅРµСЂРёСЂРѕРІР°С‚СЊ РєРѕРЅС„РёРі РёР· РІС‹Р±СЂР°РЅРЅРѕРіРѕ СЃРµСЂРІРµСЂР°");
+      debugPrint("Не удалось сгенерировать конфиг из выбранного сервера");
       return false;
     }
     await _startMihomoProcess();
-    if (currentMode == "РЎРёСЃС‚РµРјРЅС‹Р№ РїСЂРѕРєСЃРё") {
+    if (currentMode == "Системный прокси") {
       await _setWindowsSystemProxy(enabled: true);
     }
     return true;
   }
 
   Future<void> stop() async {
-    debugPrint("РћСЃС‚Р°РЅРѕРІРєР° РІСЃРµС… РїСЂРѕС†РµСЃСЃРѕРІ СЏРґСЂР°");
+    debugPrint("Остановка всех процессов ядра");
     await _killMihomoProcesses();
-    if (currentMode == "РЎРёСЃС‚РµРјРЅС‹Р№ РїСЂРѕРєСЃРё") {
+    if (currentMode == "Системный прокси") {
       await _setWindowsSystemProxy(enabled: false);
     }
   }
@@ -134,7 +134,7 @@ class CoreService {
     final configPath = p.join(axisPath, 'config.yaml');
     final mihomoPath = await _resolveMihomoBinaryPath(axisPath);
     if (mihomoPath == null) {
-      debugPrint("mihomo.exe РЅРµ РЅР°Р№РґРµРЅ, РїСЂРѕРїСѓСЃРєР°РµРј Р·Р°РїСѓСЃРє СЏРґСЂР°");
+      debugPrint("mihomo.exe не найден, пропускаем запуск ядра");
       return;
     }
 
@@ -166,7 +166,7 @@ class CoreService {
         await Process.run('pkill', ['-f', 'mihomo']);
       }
     } catch (e) {
-      debugPrint("Р—Р°С‡РёСЃС‚РєР° mihomo Р·Р°РІРµСЂС€РёР»Р°СЃСЊ СЃ РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµРј: $e");
+      debugPrint("Зачистка mihomo завершилась с предупреждением: $e");
     }
   }
 
@@ -213,22 +213,33 @@ log-level: info
 ipv6: false
 external-controller: 127.0.0.1:9090
 
-# РќР°СЃС‚СЂРѕР№РєРё СѓСЃРєРѕСЂРµРЅРёСЏ С‚СЂР°С„РёРєР°
+# Настройки ускорения трафика (оптимизировано для быстродействия)
 tcp-fast-open: true
 unified-delay: true
 global-client-fingerprint: chrome
+
+# Оптимизация соединений
+keep-alive-interval: 30
+find-process-mode: strict
+geodata-mode: true
 
 dns:
   enable: true
   listen: 0.0.0.0:1053
   enhanced-mode: fake-ip
   fake-ip-range: 198.18.0.1/16
+  fake-ip-filter:
+    - '*.lan'
+    - 'localhost.ptlogin2.qq.com'
   nameserver:
     - ${settings.customDnsEnabled ? settings.dnsPrimary : 'https://1.1.1.1/dns-query'}
     - ${settings.customDnsEnabled ? settings.dnsSecondary : 'https://8.8.8.8/dns-query'}
   fallback:
     - ${settings.customDnsEnabled ? settings.dnsPrimary : '1.1.1.1'}
     - ${settings.customDnsEnabled ? settings.dnsSecondary : '8.8.8.8'}
+  default-nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
 
 proxies:
 $proxyEntries
@@ -242,13 +253,15 @@ rules:
 ${settings.tunEnabled || currentMode == 'TUN' ? '''
 tun:
   enable: true
-  stack: gvisor
+  stack: system
   auto-route: true
   auto-detect-interface: true
+  dns-hijack:
+    - any:53
 ''' : ''}
 ''';
     await configFile.writeAsString(configContent);
-    debugPrint("РљРѕРЅС„РёРі СЃ СѓСЃРєРѕСЂРµРЅРёРµРј СЃРѕР·РґР°РЅ РІ ${configFile.path}");
+    debugPrint("Конфиг с ускорением создан в ${configFile.path}");
     return true;
   }
 
@@ -326,7 +339,7 @@ tun:
               ))
           .toList();
     } catch (e) {
-      debugPrint("РћС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё СЃРµСЂРІРµСЂРѕРІ: $e");
+      debugPrint("Ошибка загрузки серверов: $e");
       return const [];
     }
   }
@@ -337,13 +350,13 @@ tun:
       final link = server['link'];
       final testYaml = _buildProxyYamlFromLink(link, server['name'] ?? name);
       if (testYaml == null || testYaml.trim().isEmpty) {
-        debugPrint("РЎРµСЂРІРµСЂ $name РёРјРµРµС‚ РЅРµРїРѕРґРґРµСЂР¶РёРІР°РµРјС‹Р№ С„РѕСЂРјР°С‚ СЃСЃС‹Р»РєРё");
+        debugPrint("Сервер $name имеет неподдерживаемый формат ссылки");
         return false;
       }
       _selectedServerName = server['name'];
       _selectedServerLink = link;
       await _generateMihomoConfig();
-      debugPrint("Р’С‹Р±СЂР°РЅ СЃРµСЂРІРµСЂ: ${server['name']}");
+      debugPrint("Выбран сервер: ${server['name']}");
       return true;
     }
     return false;
@@ -493,7 +506,7 @@ tun:
       short-id: "${_escapeYaml(uri.queryParameters['sid'] ?? '')}"$wsBlock$grpcBlock''';
       }
     } catch (e) {
-      debugPrint("РћС€РёР±РєР° РїР°СЂСЃРёРЅРіР° СЃРµСЂРІРµСЂР°: $e");
+      debugPrint("Ошибка парсинга сервера: $e");
     }
     return null;
   }
@@ -670,7 +683,7 @@ tun:
       await Process.run('powershell', ['-NoProfile', '-Command', command]);
       return true;
     } catch (e) {
-      debugPrint('РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РїСЂРѕСЃРёС‚СЊ РїСЂР°РІР° Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°: $e');
+      debugPrint('Не удалось запросить права администратора: $e');
       return false;
     }
   }
@@ -747,17 +760,13 @@ tun:
       }
     }
     if (server == null) return null;
-    if (pingMode == 'proxy') {
-      final sw = Stopwatch()..start();
-      final ip = await _fetchIpInfoViaLocalProxy();
-      sw.stop();
-      return ip == null ? null : sw.elapsedMilliseconds;
-    }
     final endpoint = _extractEndpointFromLink(server['link'] ?? '');
     if (endpoint == null) return null;
+    
     if (pingMode == 'icmp') {
       return _icmpPing(endpoint.$1);
     }
+    // Both tcp and proxy modes use direct TCP ping for reliability
     return _tcpPing(endpoint.$1, endpoint.$2);
   }
 
@@ -791,15 +800,36 @@ tun:
   }
 
   Future<int?> _tcpPing(String host, int port) async {
-    final sw = Stopwatch()..start();
-    try {
-      final socket = await Socket.connect(host, port, timeout: const Duration(seconds: 3));
-      await socket.close();
-      sw.stop();
-      return sw.elapsedMilliseconds;
-    } catch (_) {
-      return null;
+    const attempts = 3;
+    final results = <int?>[];
+    
+    for (int i = 0; i < attempts; i++) {
+      final sw = Stopwatch()..start();
+      try {
+        final socket = await Socket.connect(host, port, timeout: const Duration(seconds: 3));
+        await socket.close();
+        sw.stop();
+        final latency = sw.elapsedMilliseconds;
+        // Filter out unrealistic low values (less than 5ms for remote servers)
+        if (latency >= 5) {
+          results.add(latency);
+        }
+      } catch (_) {
+        results.add(null);
+      }
+      
+      // Small delay between attempts
+      if (i < attempts - 1) {
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
     }
+    
+    // Calculate average of successful attempts
+    final validResults = results.where((r) => r != null).cast<int>().toList();
+    if (validResults.isEmpty) return null;
+    
+    final average = validResults.reduce((a, b) => a + b) / validResults.length;
+    return average.round();
   }
 
   Future<int?> _icmpPing(String host) async {
@@ -807,7 +837,7 @@ tun:
       final result = await Process.run('ping', Platform.isWindows ? ['-n', '1', '-w', '2000', host] : ['-c', '1', '-W', '2', host]);
       final text = '${result.stdout}\n${result.stderr}';
       final match = RegExp(r'time[=<]?\s*(\d+)', caseSensitive: false).firstMatch(text) ??
-          RegExp(r'РІСЂРµРјСЏ[=<]?\s*(\d+)', caseSensitive: false).firstMatch(text);
+          RegExp(r'время[=<]?\s*(\d+)', caseSensitive: false).firstMatch(text);
       if (match == null) return null;
       return int.tryParse(match.group(1)!);
     } catch (_) {
@@ -835,15 +865,15 @@ tun:
     final client = HttpClient();
     try {
       client.findProxy = (uri) => "PROXY 127.0.0.1:2080";
-      client.connectionTimeout = const Duration(seconds: 6);
+      client.connectionTimeout = const Duration(seconds: 2);
       final apis = <Uri>[
         Uri.parse('https://api.ipify.org?format=json'),
         Uri.parse('https://api.myip.com'),
         Uri.parse('https://ipwho.is/'),
       ];
       for (final api in apis) {
-        final req = await client.getUrl(api);
-        final res = await req.close().timeout(const Duration(seconds: 8));
+        final req = await client.getUrl(api).timeout(const Duration(seconds: 2));
+        final res = await req.close().timeout(const Duration(seconds: 3));
         if (res.statusCode != 200) {
           continue;
         }
@@ -898,7 +928,7 @@ tun:
           return null;
         }
         if (country.isNotEmpty && country != 'null') {
-          return '$ip вЂў $country';
+          return '$ip • $country';
         }
         return ip;
       }
@@ -920,7 +950,7 @@ tun:
         await Process.run('reg', ['add', key, '/v', 'ProxyOverride', '/t', 'REG_SZ', '/d', '<local>', '/f']);
       }
     } catch (e) {
-      debugPrint('РќРµ СѓРґР°Р»РѕСЃСЊ РёР·РјРµРЅРёС‚СЊ СЃРёСЃС‚РµРјРЅС‹Р№ РїСЂРѕРєСЃРё: $e');
+      debugPrint('Не удалось изменить системный прокси: $e');
     }
   }
 }
