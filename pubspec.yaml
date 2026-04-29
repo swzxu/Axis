@@ -1,5 +1,5 @@
 name: axis
-description: Axis VPN client for Windows.
+description: Axis proxy client for Windows.
 publish_to: 'none'
 version: 1.2.0+120
 
