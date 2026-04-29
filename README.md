@@ -7,7 +7,7 @@
 ## ✨ Features
 * **Subscription Management:** Easy import and update of your proxy configurations.
 * **Advanced DNS:** Custom DNS settings for better privacy and speed.
-* **Modern UI:** Beautiful Material 3 design with full Dark/Light mode support.
+* **Modern UI:** Material 3 design with full Dark/Light mode support.
 * **System Integration:** Autorun on boot and Windows native features.
 * **Customization:** Flexible color theme settings to match your style.
 
@@ -32,25 +32,6 @@ Make sure you have [Flutter](https://docs.flutter.dev/get-started/install) insta
    ```
 
 ## Build
-
-```bash
-flutter build windows --release
-```
-
----
-
-### Дополнительная информация
-- **Клонирование репозитория:** `git clone https://github.com/swzxu/Axis.git`
-- **Использование Flutter CLI для установки зависимостей и запуска приложения:**
-  ```bash
-  cd Axis
-  flutter pub get
-```
-  ```bash
-  flutter run -d windows
-  ```
-
-### Сборка
 
 ```bash
 flutter build windows --release
