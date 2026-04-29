@@ -8,7 +8,7 @@
 * **Subscription Management:** Easy import and update of your proxy configurations.
 * **Advanced DNS:** Custom DNS settings for better privacy and speed.
 * **Modern UI:** Material 3 design with full Dark/Light mode support.
-* **System Integration:** Autorun on boot and Windows native features.
+* **System Integration:** Autorun on boot and hotkeys support.
 * **Customization:** Flexible color theme settings to match your style.
 
 ## 🚀 Getting Started
