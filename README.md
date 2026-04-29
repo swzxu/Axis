@@ -1,11 +1,11 @@
-# ![Axis](https://raw.githubusercontent.com/swzxu/Axis/refs/heads/main/banner.png)
+# ![Axis](https://raw.githubusercontent.com/swzxu/axis-branding/refs/heads/main/banner.png)
 
 **Axis** is a lightweight and intuitive Flutter-based proxy client powered by the **Mihomo** (Clash) core.
 
-![Home page](https://raw.githubusercontent.com/swzxu/Axis/refs/heads/main/Axis_b1.png)
+![Home page](https://raw.githubusercontent.com/swzxu/axis-branding/refs/heads/main/Axis_b1.png)
 <p align="center">
   <a href="https://github.com/swzxu/Axis/releases/latest">
-    <img src="download.svg" alt="Download" width="240">
+    <img src="https://raw.githubusercontent.com/swzxu/axis-branding/refs/heads/main/download.svg" alt="Download" width="240">
   </a>
 </p>
 
