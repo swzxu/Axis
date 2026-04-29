@@ -25,7 +25,8 @@ Make sure you have [Flutter](https://docs.flutter.dev/get-started/install) insta
    ```bash
    cd Axis
    flutter pub get
-```
+   ```
+
 3. Run the app:
    ```bash
    flutter run -d windows
