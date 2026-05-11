@@ -1,0 +1,12 @@
+Analyzing axis...                                               
+
+  error - Expected an identifier - lib\main.dart:1182:17 - missing_identifier
+  error - Expected to find ']' - lib\main.dart:1182:17 - expected_token
+  error - Too many positional arguments: 0 expected, but 3 found - lib\main.dart:1189:9 - extra_positional_arguments_could_be_named
+  error - Expected to find ')' - lib\main.dart:1230:7 - expected_token
+   info - 'RawKeyboardListener' is deprecated and shouldn't be used. Use KeyboardListener instead. This feature was deprecated after v3.18.0-2.0.pre - lib\main.dart:2046:41 - deprecated_member_use
+   info - 'isShiftPressed' is deprecated and shouldn't be used. Use HardwareKeyboard.instance.isShiftPressed instead. This feature was deprecated after v3.18.0-2.0.pre - lib\main.dart:2052:25 - deprecated_member_use
+   info - 'isControlPressed' is deprecated and shouldn't be used. Use HardwareKeyboard.instance.isControlPressed instead. This feature was deprecated after v3.18.0-2.0.pre - lib\main.dart:2053:25 - deprecated_member_use
+   info - 'isAltPressed' is deprecated and shouldn't be used. Use HardwareKeyboard.instance.isAltPressed instead. This feature was deprecated after v3.18.0-2.0.pre - lib\main.dart:2054:25 - deprecated_member_use
+
+8 issues found. (ran in 1.9s)

@@ -13,6 +13,8 @@ class AxisStrings {
   final String networkSettingsDesc, appSettingsDesc, interfaceSettingsDesc;
   final String cancel, ok, add, save, name, serverLink;
   final String serverAddFailed, serverAdded, subscriptionAddFailed, unsupportedServerFormat, switchFailed, adminRightsFailed, connectFailed;
+  final String deleteServer, exportServer, copyLink, qrCode, serverDeleted, serverDeleteFailed, linkCopied;
+  final String proxiesCount, customServers, subscriptionSource, syncSubscription, subscriptionSynced, subscriptionSyncFailed, timedOut;
 
   AxisStrings({
     required this.shieldLabel, required this.serversLabel, required this.settingsLabel,
@@ -38,6 +40,10 @@ class AxisStrings {
     required this.cancel, required this.ok, required this.add, required this.save, required this.name, required this.serverLink,
     required this.serverAddFailed, required this.serverAdded, required this.subscriptionAddFailed, required this.unsupportedServerFormat,
     required this.switchFailed, required this.adminRightsFailed, required this.connectFailed,
+    required this.deleteServer, required this.exportServer, required this.copyLink, required this.qrCode,
+    required this.serverDeleted, required this.serverDeleteFailed, required this.linkCopied,
+    required this.proxiesCount, required this.customServers, required this.subscriptionSource,
+    required this.syncSubscription, required this.subscriptionSynced, required this.subscriptionSyncFailed, required this.timedOut,
   });
 
   static AxisStrings en = AxisStrings(
@@ -66,6 +72,11 @@ class AxisStrings {
     cancel: 'Cancel', ok: 'OK', add: 'Add', save: 'Save', name: 'Name', serverLink: 'Link (vless/vmess/ss/...)',
     serverAddFailed: 'Failed to add server', serverAdded: 'Server added', subscriptionAddFailed: 'Failed to add subscription',
     unsupportedServerFormat: 'Unsupported server format', switchFailed: 'Switch failed: unsupported server format', adminRightsFailed: 'Failed to request administrator rights for TUN', connectFailed: 'Failed to connect: check server or subscription format',
+    deleteServer: 'Delete server', exportServer: 'Export server', copyLink: 'Copy link', qrCode: 'QR code',
+    serverDeleted: 'Server deleted', serverDeleteFailed: 'Failed to delete server', linkCopied: 'Link copied',
+    proxiesCount: 'proxies', customServers: 'Custom', subscriptionSource: 'Subscription',
+    syncSubscription: 'Sync subscription', subscriptionSynced: 'Subscription synced', subscriptionSyncFailed: 'Failed to sync subscription',
+    timedOut: 'timed out',
   );
 
   static AxisStrings ru = AxisStrings(
@@ -95,5 +106,10 @@ class AxisStrings {
     cancel: 'Отмена', ok: 'OK', add: 'Добавить', save: 'Сохранить', name: 'Имя', serverLink: 'Ссылка (vless/vmess/ss/...)',
     serverAddFailed: 'Не удалось добавить сервер', serverAdded: 'Сервер добавлен', subscriptionAddFailed: 'Не удалось добавить подписку',
     unsupportedServerFormat: 'Формат ссылки сервера не поддерживается', switchFailed: 'Переключение не удалось: формат сервера не поддерживается', adminRightsFailed: 'Не удалось запросить права администратора для TUN', connectFailed: 'Не удалось подключиться: проверь формат сервера/подписки',
+    deleteServer: 'Удалить сервер', exportServer: 'Экспорт сервера', copyLink: 'Скопировать ссылку', qrCode: 'QR-код',
+    serverDeleted: 'Сервер удалён', serverDeleteFailed: 'Не удалось удалить сервер', linkCopied: 'Ссылка скопирована',
+    proxiesCount: 'прокси', customServers: 'Пользовательские', subscriptionSource: 'Подписка',
+    syncSubscription: 'Синхронизировать подписку', subscriptionSynced: 'Подписка синхронизирована', subscriptionSyncFailed: 'Не удалось синхронизировать подписку',
+    timedOut: 'нет ответа',
   );
 }

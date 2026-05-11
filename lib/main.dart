@@ -1,13 +1,17 @@
 import 'dart:io';
 import 'dart:convert';
 import 'dart:async';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:system_tray/system_tray.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:country_flags/country_flags.dart';
 import 'package:hotkey_manager/hotkey_manager.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:windows_notification/windows_notification.dart';
+import 'package:windows_notification/notification_message.dart';
 import 'localization.dart';
 import 'core_service.dart';
 
@@ -152,10 +156,13 @@ class _AxisAppState extends State<AxisApp> {
   }
 
   ThemeData _appTheme(Color seedColor, Brightness brightness) {
-    return ThemeData(
+    final base = ThemeData(
       useMaterial3: true,
       colorSchemeSeed: seedColor,
       brightness: brightness,
+    );
+
+    return base.copyWith(
       cardTheme: CardThemeData(
         margin: const EdgeInsets.symmetric(vertical: 8),
         elevation: 0,
@@ -173,6 +180,7 @@ class _AxisAppState extends State<AxisApp> {
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       ),
+      textTheme: GoogleFonts.robotoFlexTextTheme(base.textTheme),
     );
   }
 
@@ -382,7 +390,7 @@ class MainNavigation extends StatefulWidget {
 class _MainNavigationState extends State<MainNavigation> {
   int _selectedIndex = 0;
   bool _isConnected = false;
-  String _ipAddress = "...";
+  IpInfo _ipInfo = const IpInfo('...', null);
   String? _selectedServer;
   String _pingMode = 'tcp';
   String _subscriptionName = '';
@@ -390,9 +398,11 @@ class _MainNavigationState extends State<MainNavigation> {
   bool _isPingingAll = false;
   bool _sortByPing = false;
   bool _showFavoritesOnly = false;
+  bool _isIpHovered = false;
   Map<String, int?> _pingByServer = {};
   VoidCallback? _settingsPageRefresh;
-  
+  bool _autoUpdateRunning = false;
+
   final CoreService _coreService = CoreService();
   final SystemTray _systemTray = SystemTray();
   final AppWindow _appWindow = AppWindow();
@@ -562,6 +572,31 @@ class _MainNavigationState extends State<MainNavigation> {
     } catch (e) {
       debugPrint('Hotkey registration failed: $e');
     }
+    try {
+      await _initWindowsNotification();
+    } catch (e) {
+      debugPrint('Windows notification init failed: $e');
+    }
+  }
+
+  // Missing methods from original code
+  void _startAutoUpdateTask() {
+    _updateTimer = Timer.periodic(const Duration(hours: 12), (timer) async {
+      if (_autoUpdateRunning) return;
+      _autoUpdateRunning = true;
+      try {
+        final groups = await _coreService.getSubscriptionGroups();
+        for (final group in groups) {
+          try {
+            await _coreService.refreshSubscription(group.id);
+          } catch (e) {
+            debugPrint('Auto-update failed for ${group.name}: $e');
+          }
+        }
+      } finally {
+        _autoUpdateRunning = false;
+      }
+    });
   }
 
   Future<void> _restoreSelectedServer() async {
@@ -582,18 +617,38 @@ class _MainNavigationState extends State<MainNavigation> {
     _emitConfigChange({...widget.config, 'selectedServer': fallback});
   }
 
-  @override
-  void dispose() {
-    _updateTimer?.cancel();
-    _dnsPrimaryController.dispose();
-    _dnsSecondaryController.dispose();
-    HotKeyManager.instance.unregisterAll();
-    _coreService.stop();
-    super.dispose();
+  Future<void> _initSystemTray() async {
+    try {
+      final iconPath = _trayIconPath(Platform.isWindows ? 'assets/tray_disconnected.ico' : 'assets/tray_disconnected.ico');
+      if (iconPath == null) return;
+      await _systemTray.initSystemTray(title: "Axis VPN", iconPath: iconPath);
+      await _updateTrayMenu();
+      _systemTray.registerSystemTrayEventHandler((name) {
+        if (name == kSystemTrayEventClick) {
+          _appWindow.show();
+        } else if (name == kSystemTrayEventRightClick) {
+          _systemTray.popUpContextMenu();
+        }
+      });
+    } catch (e) { debugPrint("Tray error: $e"); }
   }
 
-  void _startAutoUpdateTask() {
-    _updateTimer = Timer.periodic(const Duration(hours: 12), (timer) async {});
+  String? _trayIconPath(String assetPath) {
+    if (assetPath.isEmpty) return null;
+    if (Platform.isMacOS) return assetPath;
+    return p.join(
+      p.dirname(Platform.resolvedExecutable),
+      'data',
+      'flutter_assets',
+      assetPath,
+    );
+  }
+
+  Future<void> _updateTrayIcon() async {
+    final connectedIcon = _trayIconPath('assets/tray_connected.ico');
+    final disconnectedIcon = _trayIconPath('assets/tray_disconnected.ico');
+    if (connectedIcon == null || disconnectedIcon == null) return;
+    await _systemTray.setImage(_isConnected ? connectedIcon : disconnectedIcon);
   }
 
   Future<void> _pingAllServers() async {
@@ -607,17 +662,27 @@ class _MainNavigationState extends State<MainNavigation> {
   }
 
   String _displayServerName(ServerEntry entry) {
-    return entry.name;
+    return _decodeDisplayName(entry.name);
   }
 
   String _displayServerNameFromRaw(String raw) {
-    final name = raw.trim();
+    final name = _decodeDisplayName(raw);
     final match = RegExp(r'^([A-Za-z]{2})[\s\-_]+(.+)$').firstMatch(name);
     if (match != null) {
       final rest = (match.group(2) ?? '').trim();
       if (rest.isNotEmpty) return rest;
     }
     return name;
+  }
+
+  String _decodeDisplayName(String value) {
+    final trimmed = value.trim();
+    if (!trimmed.contains('%')) return trimmed;
+    try {
+      return Uri.decodeComponent(trimmed);
+    } catch (_) {
+      return trimmed;
+    }
   }
 
   String? _displayCountryCodeFromRaw(String raw) {
@@ -633,21 +698,26 @@ class _MainNavigationState extends State<MainNavigation> {
       builder: (ctx) => AlertDialog(
         title: Text(s.addServer),
         content: SizedBox(
-          width: 420,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(controller: nameCtrl, decoration: InputDecoration(labelText: s.name)),
-              const SizedBox(height: 10),
-              TextField(controller: linkCtrl, decoration: InputDecoration(labelText: s.serverLink)),
-            ],
+          width: 380,
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(controller: nameCtrl, decoration: InputDecoration(labelText: s.name)),
+                const SizedBox(height: 10),
+                TextField(controller: linkCtrl, decoration: InputDecoration(labelText: s.serverLink)),
+              ],
+            ),
           ),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: Text(s.cancel)),
           FilledButton(
             onPressed: () async {
-              final ok = await _coreService.addCustomServer(name: nameCtrl.text.trim(), link: linkCtrl.text.trim());
+              final ok = await _coreService.addCustomServer(
+                name: nameCtrl.text.trim(),
+                link: linkCtrl.text.trim(),
+              );
               if (!ctx.mounted || !mounted) return;
               Navigator.of(ctx).pop();
               if (!ok) {
@@ -737,38 +807,40 @@ class _MainNavigationState extends State<MainNavigation> {
     );
   }
 
-  Future<void> _initSystemTray() async {
-    try {
-      final iconPath = _trayIconPath(Platform.isWindows ? 'assets/tray_disconnected.ico' : 'assets/tray_disconnected.ico');
-      if (iconPath == null) return;
-      await _systemTray.initSystemTray(title: "Axis VPN", iconPath: iconPath);
-      await _updateTrayMenu();
-      _systemTray.registerSystemTrayEventHandler((name) {
-        if (name == kSystemTrayEventClick) {
-          _appWindow.show();
-        } else if (name == kSystemTrayEventRightClick) {
-          _systemTray.popUpContextMenu();
-        }
-      });
-    } catch (e) { debugPrint("Tray error: $e"); }
-  }
-
-  Future<void> _updateTrayIcon() async {
-    final connectedIcon = _trayIconPath('assets/tray_connected.ico');
-    final disconnectedIcon = _trayIconPath('assets/tray_disconnected.ico');
-    if (connectedIcon == null || disconnectedIcon == null) return;
-    await _systemTray.setImage(_isConnected ? connectedIcon : disconnectedIcon);
-  }
-
-  String? _trayIconPath(String assetPath) {
-    if (assetPath.isEmpty) return null;
-    if (Platform.isMacOS) return assetPath;
-    return p.join(
-      p.dirname(Platform.resolvedExecutable),
-      'data',
-      'flutter_assets',
-      assetPath,
+  Future<void> _refreshSubscription(SubscriptionGroup group) async {
+    final result = await _coreService.refreshSubscription(group.id);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(result.success ? s.subscriptionSynced : s.subscriptionSyncFailed)),
     );
+    if (result.success) {
+      setState(() {});
+    }
+  }
+
+  late final WindowsNotification _windowsNotification;
+
+  Future<void> _initWindowsNotification() async {
+    if (!Platform.isWindows) {
+      return;
+    }
+    _windowsNotification = WindowsNotification(applicationId: 'Axis');
+  }
+
+  Future<void> _showWindowsNotification(String title, String message) async {
+    if (!Platform.isWindows) return;
+    try {
+      final uniqueId = DateTime.now().millisecondsSinceEpoch.toString();
+      final notificationMessage = NotificationMessage.fromPluginTemplate(
+        uniqueId,
+        title,
+        message,
+         image: _trayIconPath('/windows/runner/resources/app_icon.ico')
+      );
+      await _windowsNotification.showNotificationPluginTemplate(notificationMessage);
+    } catch (e) {
+      debugPrint('Windows notification error: $e');
+    }
   }
 
   Future<void> _updateTrayMenu() async {
@@ -794,48 +866,29 @@ class _MainNavigationState extends State<MainNavigation> {
     }
   }
 
-  Future<void> _showWindowsNotification(String title, String message) async {
-    if (!Platform.isWindows) return;
-    try {
-      final connectedIcon = _trayIconPath('assets/tray_connected.ico');
-      final disconnectedIcon = _trayIconPath('assets/tray_disconnected.ico');
-      final iconPath = _isConnected ? connectedIcon : disconnectedIcon;
-      
-      final script = r'''
-try {
-    if (Get-Module -ListAvailable -Name BurntToast) {
-        New-BurntToastNotification -Title '{title}' -Body '{message}' -AppLogo '{icon}' -AppId 'Axis'
-    } else {
-        Add-Type -AssemblyName System.Windows.Forms
-        $notify = New-Object System.Windows.Forms.NotifyIcon
-        $notify.Icon = [System.Drawing.Icon]::ExtractAssociatedIcon('{icon}')
-        $notify.Text = 'Axis'
-        $notify.BalloonTipTitle = '{title}'
-        $notify.BalloonTipText = '{message}'
-        $notify.Visible = $true
-        $notify.ShowBalloonTip(3000)
-        Start-Sleep -Milliseconds 3500
-        $notify.Dispose()
-    }
-} catch {}
-'''.replaceAll('{title}', title).replaceAll('{message}', message).replaceAll('{icon}', iconPath ?? '');
-      await Process.run('powershell', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', script]);
-    } catch (e) {
-      debugPrint('Notification error: $e');
-    }
-  }
 
   Future<void> _handleConnect() async {
     if (_isConnected) {
       await _coreService.stop();
-      setState(() { _isConnected = false; _ipAddress = s.disconnected; });
+      setState(() {
+        _isConnected = false;
+        _ipInfo = IpInfo(s.disconnected, null);
+      });
       _showWindowsNotification(s.vpnInactive, s.disconnected);
     } else {
-      if (_coreService.currentMode == 'TUN') {
+      if (_coreService.currentMode == CoreService.modeTun) {
         final admin = await _coreService.isRunningAsAdmin();
         if (!admin) {
           final relaunched = await _coreService.relaunchAsAdmin();
           if (relaunched) {
+            // Гарантированно закрываем текущую (не-админ) копию, чтобы не оставалось двух процессов после UAC.
+            await _coreService.stop();
+            await Future.delayed(const Duration(milliseconds: 200));
+
+            final currentPid = pid;
+            if (Platform.isWindows) {
+              await Process.run('taskkill', ['/PID', '$currentPid', '/F']);
+            }
             exit(0);
           }
           if (!mounted) return;
@@ -867,14 +920,15 @@ try {
         if (!mounted) return;
         setState(() {
           _isConnected = false;
-          _ipAddress = s.disconnected;
+          _ipInfo = IpInfo(s.disconnected, null);
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(s.connectFailed)),
         );
         return;
       }
-      _ipAddress = await _coreService.fetchPublicIP();
+      final ipInfo = await _coreService.fetchPublicIP();
+      _ipInfo = ipInfo;
       _showWindowsNotification(s.vpnActive, _selectedServer ?? s.vpnActive);
       setState(() {});
     }
@@ -952,112 +1006,223 @@ try {
     }
   }
 
+  String _countryCodeToEmoji(String countryCode) {
+    final code = countryCode.toUpperCase();
+    if (code.length != 2) return '🏳️';
+    final emoji = String.fromCharCode(0x1F1E6 + (code.codeUnitAt(0) - 'A'.codeUnitAt(0))) +
+        String.fromCharCode(0x1F1E6 + (code.codeUnitAt(1) - 'A'.codeUnitAt(0)));
+    return emoji;
+  }
+
   Widget _dashboard(ColorScheme cs) => Center(
     child: SingleChildScrollView(
       padding: const EdgeInsets.all(24.0),
-      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-        AnimatedContainer(
-          duration: const Duration(milliseconds: 350),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          decoration: BoxDecoration(
-            color: (_isConnected ? cs.primaryContainer : cs.surfaceContainerHigh).withValues(alpha: 0.65),
-            borderRadius: BorderRadius.circular(999),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(_isConnected ? Icons.shield_rounded : Icons.shield_outlined, size: 20),
-              const SizedBox(width: 10),
-              Text(
-                _isConnected ? s.vpnActive : s.vpnInactive,
-                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 24),
-        AnimatedContainer(
-          duration: const Duration(milliseconds: 400),
-          padding: const EdgeInsets.all(48),
-          decoration: BoxDecoration(
-            shape: BoxShape.circle, 
-            color: _isConnected ? cs.primaryContainer : cs.surfaceContainerHighest,
-            boxShadow: _isConnected ? [BoxShadow(color: cs.primary.withValues(alpha: 0.3), blurRadius: 48, spreadRadius: 2)] : [],
-          ),
-          child: Icon(Icons.vpn_lock_rounded, size: 100, color: _isConnected ? cs.primary : cs.onSurfaceVariant),
-        ),
-        const SizedBox(height: 28),
-        Card(
-          elevation: 0,
-          color: cs.secondaryContainer.withValues(alpha: 0.5),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-          child: Padding(padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20), child: Column(children: [
-            if (_selectedServer != null)
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if ((_displayCountryCodeFromRaw(_selectedServer!) ?? '').length == 2)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 10),
-                      child: CountryFlag.fromCountryCode(
-                        _displayCountryCodeFromRaw(_selectedServer!)!,
-                        theme: const ImageTheme(width: 24, height: 24, shape: Circle()),
-                      ),
-                    ),
-                  Text(_displayServerNameFromRaw(_selectedServer!), style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
-                ],
-              )
-            else
-              Text(s.selectServer, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
-            const SizedBox(height: 8),
-            Text(
-              _ipAddress == "..." ? s.disconnected : _ipAddress,
-              style: TextStyle(color: cs.primary, fontFamily: Platform.isWindows ? 'Consolas' : 'monospace', fontSize: 14, fontWeight: FontWeight.w500),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 350),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            decoration: BoxDecoration(
+              color: (_isConnected ? cs.primaryContainer : cs.surfaceContainerHigh).withValues(alpha: 0.65),
+              borderRadius: BorderRadius.circular(999),
             ),
-          ])),
-        ),
-        AnimatedSize(
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeInOut,
-          child: _coreService.currentMode == "Просто прокси" && _isConnected
-            ? Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: Card(
-                  elevation: 1,
-                  color: cs.tertiaryContainer.withValues(alpha: 0.3),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  child: const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                    child: Text("SOCKS5/HTTP: 127.0.0.1:2080", style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(_isConnected ? Icons.shield_rounded : Icons.shield_outlined, size: 20),
+                const SizedBox(width: 10),
+                Text(
+                  _isConnected ? s.vpnActive : s.vpnInactive,
+                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 400),
+            padding: const EdgeInsets.all(48),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: _isConnected ? cs.primaryContainer : cs.surfaceContainerHighest,
+              boxShadow: _isConnected
+                  ? [BoxShadow(color: cs.primary.withValues(alpha: 0.3), blurRadius: 48, spreadRadius: 2)]
+                  : [],
+            ),
+            child: Icon(Icons.vpn_lock_rounded, size: 100, color: _isConnected ? cs.primary : cs.onSurfaceVariant),
+          ),
+          const SizedBox(height: 28),
+          Center(
+            child: Card(
+                elevation: 0,
+                color: cs.secondaryContainer.withValues(alpha: 0.42),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (_selectedServer != null)
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if ((_displayCountryCodeFromRaw(_selectedServer!) ?? '').length == 2)
+                                Padding(
+                                  padding: const EdgeInsets.only(right: 10),
+                                  child: Text(
+                                    _countryCodeToEmoji(_displayCountryCodeFromRaw(_selectedServer!)!),
+                                    style: const TextStyle(fontSize: 22),
+                                  ),
+                                ),
+                              Text(
+                                _displayServerNameFromRaw(_selectedServer!),
+                                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                              ),
+                            ],
+                          )
+                        else
+                          Text(s.selectServer, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                        const SizedBox(height: 6),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            if (_ipInfo.countryCode != null)
+                              Padding(
+                                padding: const EdgeInsets.only(right: 6),
+                                child: Text(
+                                  _countryCodeToEmoji(_ipInfo.countryCode!),
+                                  style: const TextStyle(fontSize: 16),
+                                ),
+                              ),
+                            Builder(
+                              builder: (_) {
+                                final ip = _ipInfo.ip.trim();
+                                final hasRealIp = ip.isNotEmpty && ip != "..." && ip != s.disconnected;
+                                if (!hasRealIp) {
+                                  return Text(
+                                    s.disconnected,
+                                    style: TextStyle(
+                                      color: cs.primary,
+                                      fontFamily: Platform.isWindows ? 'Consolas' : 'monospace',
+                                      fontSize: 13.5,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  );
+                                }
+                                final isConnected = _isConnected;
+                                final hoverTarget = _isIpHovered ? 1.0 : 0.0;
+                                final canBlur = isConnected;
+                                return MouseRegion(
+                                  cursor: SystemMouseCursors.click,
+                                  onEnter: (_) => setState(() => _isIpHovered = true),
+                                  onExit: (_) => setState(() => _isIpHovered = false),
+                                  child: TweenAnimationBuilder<double>(
+                                    duration: const Duration(milliseconds: 220),
+                                    curve: Curves.easeOutCubic,
+                                    tween: Tween<double>(begin: 0, end: canBlur ? hoverTarget : 1.0),
+                                    builder: (ctx, hoverT, _) {
+                                      final frostedBlurSigma = canBlur ? (lerpDouble(12, 0.0, hoverT) ?? 0.0) : 0.0;
+                                      final textBlurSigma = canBlur ? (lerpDouble(10, 0.0, hoverT) ?? 0.0) : 0.0;
+                                      final frostedAlpha = canBlur ? (lerpDouble(0.12, 0.06, hoverT) ?? 0.06) : 0.06;
+                                      final textOpacity = canBlur ? (lerpDouble(0.85, 1.0, hoverT) ?? 1.0) : 1.0;
+                                      return ClipRRect(
+                                        borderRadius: BorderRadius.circular(10),
+                                        child: BackdropFilter(
+                                          filter: ImageFilter.blur(
+                                            sigmaX: frostedBlurSigma,
+                                            sigmaY: frostedBlurSigma,
+                                          ),
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                            decoration: BoxDecoration(
+                                              color: cs.surfaceContainerHighest.withValues(alpha: frostedAlpha),
+                                              borderRadius: BorderRadius.circular(10),
+                                            ),
+                                            child: Center(
+                                              child: Opacity(
+                                                opacity: textOpacity,
+                                                child: ImageFiltered(
+                                                  imageFilter: ImageFilter.blur(
+                                                    sigmaX: textBlurSigma,
+                                                    sigmaY: textBlurSigma,
+                                                  ),
+                                                  child: Text(
+                                                    ip,
+                                                    style: TextStyle(
+                                                      color: cs.primary,
+                                                      fontFamily: Platform.isWindows ? 'Consolas' : 'monospace',
+                                                      fontSize: 13.5,
+                                                      fontWeight: FontWeight.w600,
+                                                      letterSpacing: 0.2,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                );
+                              },
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              )
-            : const SizedBox.shrink(),
-        ),
-        const SizedBox(height: 32),
-        SizedBox(
-          width: 300, 
-          height: 56, 
-          child: FilledButton.icon(
-            onPressed: _handleConnect,
-            style: FilledButton.styleFrom(
-              backgroundColor: _isConnected ? cs.errorContainer : cs.primary,
-              foregroundColor: _isConnected ? cs.onErrorContainer : cs.onPrimary,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              elevation: 2,
-            ),
-            icon: Icon(_isConnected ? Icons.stop_circle_outlined : Icons.power_settings_new_rounded, size: 22),
-            label: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 200),
-              child: Text(
-                _isConnected ? s.disconnect : s.connect,
-                key: ValueKey(_isConnected),
-                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+              ),
+          ),
+          AnimatedSize(
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+            child: _coreService.currentMode == CoreService.modeProxy && _isConnected
+                ? Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: Card(
+                      elevation: 1,
+                      color: cs.tertiaryContainer.withValues(alpha: 0.3),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      child: const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                        child: Text(
+                          "SOCKS5/HTTP: 127.0.0.1:2080",
+                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                        ),
+                      ),
+                    ),
+                  )
+                : const SizedBox.shrink(),
+          ),
+          const SizedBox(height: 32),
+          SizedBox(
+            width: 300,
+            height: 56,
+            child: FilledButton.icon(
+              onPressed: _handleConnect,
+              style: FilledButton.styleFrom(
+                backgroundColor: _isConnected ? cs.errorContainer : cs.primary,
+                foregroundColor: _isConnected ? cs.onErrorContainer : cs.onPrimary,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                elevation: 2,
+              ),
+              icon: Icon(_isConnected ? Icons.stop_circle_outlined : Icons.power_settings_new_rounded, size: 22),
+              label: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 200),
+                child: Text(
+                  _isConnected ? s.disconnect : s.connect,
+                  key: ValueKey(_isConnected),
+                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+                ),
               ),
             ),
           ),
-        ),
-      ]),
+        ],
+      ),
     ),
   );
 
@@ -1135,10 +1300,21 @@ try {
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                         child: ExpansionTile(
                           title: Text(group.name),
-                          subtitle: Text('${list.length} proxies'),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.edit),
-                            onPressed: () => _showRenameSubscriptionDialog(group),
+                          subtitle: Text('${list.length} ${s.proxiesCount}'),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: const Icon(Icons.sync_rounded),
+                                tooltip: s.syncSubscription,
+                                onPressed: () => _refreshSubscription(group),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.edit),
+                                tooltip: s.renameSubscription,
+                                onPressed: () => _showRenameSubscriptionDialog(group),
+                              ),
+                            ],
                           ),
                           children: list.map((entry) => _proxyTile(entry, cs)).toList(),
                         ),
@@ -1150,8 +1326,8 @@ try {
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                         child: ExpansionTile(
                           initiallyExpanded: true,
-                          title: const Text('Custom'),
-                          subtitle: Text('${customList.length} proxies'),
+                          title: Text(s.customServers),
+                          subtitle: Text('${customList.length} ${s.proxiesCount}'),
                           children: customList.where((e) => !_showFavoritesOnly || favorites.contains(e.name)).map((entry) => _proxyTile(entry, cs)).toList(),
                         ),
                       ),
@@ -1170,84 +1346,175 @@ try {
     final pingMs = _pingByServer[entry.name];
     final favorites = widget.config['favorites'] as List<String>? ?? [];
     final isFavorite = favorites.contains(entry.name);
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      elevation: isSelected ? 2 : 0,
-      color: isSelected ? cs.primaryContainer : cs.surface,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        leading: entry.countryCode != null
-            ? CountryFlag.fromCountryCode(
-                entry.countryCode!,
-              )
-            : const Padding(
-                padding: EdgeInsets.only(right: 8),
-                child: Icon(Icons.public, size: 28),
-              ),
-        title: Text(_displayServerName(entry), style: TextStyle(fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500)),
-        subtitle: Text(
-          pingMs != null ? '${pingMs} ms' : (entry.source == 'custom' ? 'Custom' : 'Subscription'),
-          style: TextStyle(color: cs.onSurfaceVariant, fontSize: 13),
-        ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              icon: Icon(
-              isFavorite ? Icons.star : Icons.star_border,
-              color: isFavorite ? Colors.amber : cs.onSurfaceVariant,
-              size: 20,
+    return GestureDetector(
+      onSecondaryTapDown: (details) => _showServerContextMenu(entry, details.globalPosition),
+      child: Card(
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        elevation: isSelected ? 2 : 0,
+        color: isSelected ? cs.primaryContainer : cs.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          leading: entry.countryCode != null // эта сучка ни в какую не хочет показывать эмодзи, я ебал это делать
+              ? Text(
+                  _countryCodeToEmoji(entry.countryCode!),
+                  style: const TextStyle(fontSize: 28),
+                )
+              : const Padding(
+                  padding: EdgeInsets.only(right: 8),
+                  child: Icon(Icons.public, size: 28),
+                ),
+          title: Text(_displayServerName(entry), style: TextStyle(fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500)),
+          subtitle: Text(
+            pingMs == null 
+                ? (entry.source == 'custom' ? s.customServers : s.subscriptionSource)
+                : (pingMs == 0 ? s.timedOut : '$pingMs ms'),
+            style: TextStyle(
+              color: pingMs == 0 ? Colors.red : cs.onSurfaceVariant,
+              fontSize: 13,
             ),
-            onPressed: () {
-              final newFavorites = List<String>.from(favorites);
-              if (isFavorite) {
-                newFavorites.remove(entry.name);
-              } else {
-                newFavorites.add(entry.name);
-              }
-              _emitConfigChange({...widget.config, 'favorites': newFavorites});
-            },
           ),
-          AnimatedOpacity(
-            duration: const Duration(milliseconds: 200),
-            opacity: isSelected ? 1 : 0,
-            child: Icon(Icons.check_circle, color: cs.primary, size: 20),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                icon: Icon(
+                  isFavorite ? Icons.star : Icons.star_border,
+                  color: isFavorite ? Colors.amber : cs.onSurfaceVariant,
+                  size: 20,
+                ),
+                onPressed: () {
+                  final newFavorites = List<String>.from(favorites);
+                  if (isFavorite) {
+                    newFavorites.remove(entry.name);
+                  } else {
+                    newFavorites.add(entry.name);
+                  }
+                  _emitConfigChange({...widget.config, 'favorites': newFavorites});
+                },
+              ),
+              AnimatedOpacity(
+                duration: const Duration(milliseconds: 200),
+                opacity: isSelected ? 1 : 0,
+                child: Icon(Icons.check_circle, color: cs.primary, size: 20),
+              ),
+            ],
+          ),
+          onTap: () async {
+            final previousServer = _selectedServer;
+            setState(() => _selectedServer = entry.name);
+            final selected = await _coreService.selectServer(entry.name);
+            if (!mounted) return;
+            if (!selected) {
+              setState(() => _selectedServer = previousServer);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text(s.unsupportedServerFormat)),
+              );
+              return;
+            }
+            if (_isConnected) {
+              final started = await _coreService.initAndStart();
+              if (!mounted) return;
+              if (!started) {
+                setState(() {
+                  _isConnected = false;
+                  _ipInfo = IpInfo(s.disconnected, null);
+                });
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text(s.switchFailed)),
+                );
+                return;
+              }
+            }
+            _emitConfigChange({...widget.config, 'selectedServer': entry.name});
+            _ipInfo = await _coreService.fetchPublicIP();
+            if (!mounted) return;
+            setState(() {});
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showServerContextMenu(ServerEntry entry, Offset position) async {
+    final selected = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(position.dx, position.dy, position.dx, position.dy),
+      items: [
+        PopupMenuItem(
+          value: 'export',
+          child: ListTile(dense: true, leading: const Icon(Icons.ios_share_rounded), title: Text(s.exportServer)),
+        ),
+        PopupMenuItem(
+          value: 'delete',
+          child: ListTile(dense: true, leading: const Icon(Icons.delete_outline_rounded), title: Text(s.deleteServer)),
+        ),
+      ],
+    );
+    if (!mounted) return;
+    if (selected == 'export') {
+      _showServerExportDialog(entry);
+    } else if (selected == 'delete') {
+      await _deleteServer(entry);
+    }
+  }
+
+  Future<void> _deleteServer(ServerEntry entry) async {
+    final ok = await _coreService.deleteServer(entry);
+    if (!mounted) return;
+    if (ok) {
+      final favorites = List<String>.from(widget.config['favorites'] as List<String>? ?? []);
+      favorites.remove(entry.name);
+      if (_selectedServer == entry.name) {
+        _selectedServer = null;
+        _ipInfo = IpInfo(s.disconnected, null);
+      }
+      _emitConfigChange({...widget.config, 'favorites': favorites, 'selectedServer': _selectedServer});
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s.serverDeleted)));
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s.serverDeleteFailed)));
+    }
+  }
+
+  Future<void> _showServerExportDialog(ServerEntry entry) async {
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(s.exportServer),
+        content: SizedBox(
+          width: 360,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
+                child: QrImageView(data: entry.link, version: QrVersions.auto, size: 220, backgroundColor: Colors.white),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: TextEditingController(text: entry.link),
+                readOnly: true,
+                maxLines: 3,
+                decoration: InputDecoration(labelText: s.serverLink, border: const OutlineInputBorder()),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(s.cancel)),
+          FilledButton.icon(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: entry.link));
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s.linkCopied)));
+            },
+            icon: const Icon(Icons.copy_rounded),
+            label: Text(s.copyLink),
           ),
         ],
       ),
-      onTap: () async {
-        final previousServer = _selectedServer;
-        setState(() => _selectedServer = entry.name);
-        final selected = await _coreService.selectServer(entry.name);
-        if (!mounted) return;
-        if (!selected) {
-          setState(() => _selectedServer = previousServer);
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(s.unsupportedServerFormat)),
-          );
-          return;
-        }
-        if (_isConnected) {
-          final started = await _coreService.initAndStart();
-          if (!mounted) return;
-          if (!started) {
-            setState(() {
-              _isConnected = false;
-              _ipAddress = s.disconnected;
-            });
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(s.switchFailed)),
-            );
-            return;
-          }
-        }
-        _emitConfigChange({...widget.config, 'selectedServer': entry.name});
-        _ipAddress = await _coreService.fetchPublicIP();
-        if (!mounted) return;
-        setState(() {});
-      },
-    ),
     );
   }
 
@@ -1267,7 +1534,7 @@ try {
           child: Icon(Icons.info_outline, color: cs.primary),
         ),
         title: Text(s.about, style: const TextStyle(fontWeight: FontWeight.w500)),
-        subtitle: const Text("Axis v1.3.0"),
+        subtitle: const Text("Axis v1.3.1"),
         trailing: Icon(Icons.open_in_new_rounded, size: 22, color: cs.onSurfaceVariant),
         onTap: () async {
           final Uri url = Uri.parse('https://github.com/swzxu/axis');
@@ -1367,7 +1634,7 @@ try {
         onChanged: (v) {
           if (_isConnected || v == null) return;
           _coreService.currentMode = v;
-          final tunEnabled = v == 'TUN' ? true : (widget.config['tunEnabled'] ?? false);
+          final tunEnabled = v == CoreService.modeTun ? true : (widget.config['tunEnabled'] ?? false);
           _coreService.applySettings(CoreSettings(
             tunEnabled: tunEnabled,
             customDnsEnabled: widget.config['customDnsEnabled'] ?? false,
@@ -1770,18 +2037,19 @@ try {
   }
   void _showHotkeyDialog(String hotkeyKey) {
     String capturedHotkey = '';
+    final focusNode = FocusNode()..requestFocus();
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
-        builder: (context, setState) => RawKeyboardListener(
-          focusNode: FocusNode()..requestFocus(),
-          onKey: (event) {
-            if (event.runtimeType.toString().contains('Down')) {
+        builder: (context, setState) => KeyboardListener(
+          focusNode: focusNode,
+          onKeyEvent: (event) {
+            if (event is KeyDownEvent) {
               final key = event.logicalKey;
               final modifiers = <String>[];
-              if (event.isShiftPressed) modifiers.add('Shift');
-              if (event.isControlPressed) modifiers.add('Ctrl');
-              if (event.isAltPressed) modifiers.add('Alt');
+              if (HardwareKeyboard.instance.isShiftPressed) modifiers.add('Shift');
+              if (HardwareKeyboard.instance.isControlPressed) modifiers.add('Ctrl');
+              if (HardwareKeyboard.instance.isAltPressed) modifiers.add('Alt');
               final keyName = key.keyLabel;
               if (keyName.isNotEmpty && keyName.length <= 1) {
                 capturedHotkey = modifiers.isEmpty ? keyName : '${modifiers.join('+')}+$keyName';
@@ -1833,7 +2101,7 @@ try {
           ),
         ),
       ),
-    );
+    ).then((_) => focusNode.dispose());
   }
 
   void _showRoutingRulesDialog() {
@@ -1875,4 +2143,3 @@ try {
     );
   }
 }
-
