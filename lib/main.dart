@@ -41,6 +41,9 @@ class _AxisAppState extends State<AxisApp> {
   bool _autoStart = false;
   String _themeMode = 'system';
   bool _useSystemAccent = false;
+
+  bool _blurIpEnabled = true;
+
   bool _isLoading = true;
   bool _showFirstRunWizard = false;
   bool _isCompletingFirstRun = false;
@@ -88,6 +91,7 @@ class _AxisAppState extends State<AxisApp> {
           _autoStart = data['autoStart'] ?? false;
           _themeMode = data['themeMode'] ?? 'system';
           _useSystemAccent = data['useSystemAccent'] ?? false;
+          _blurIpEnabled = data['blurIpEnabled'] ?? true;
           _favorites = List<String>.from(data['favorites'] ?? []);
           _hotkeyToggleConnection = data['hotkeyToggleConnection'] ?? '';
           _hotkeyToggleWindow = data['hotkeyToggleWindow'] ?? '';
@@ -144,6 +148,7 @@ class _AxisAppState extends State<AxisApp> {
         'autoStart': _autoStart,
         'themeMode': _themeMode,
         'useSystemAccent': _useSystemAccent,
+        'blurIpEnabled': _blurIpEnabled,
         'favorites': _favorites,
         'hotkeyToggleConnection': _hotkeyToggleConnection,
         'hotkeyToggleWindow': _hotkeyToggleWindow,
@@ -335,6 +340,7 @@ class _AxisAppState extends State<AxisApp> {
           'autoStart': _autoStart,
           'themeMode': _themeMode,
           'useSystemAccent': _useSystemAccent,
+          'blurIpEnabled': _blurIpEnabled,
           'favorites': _favorites,
           'hotkeyToggleConnection': _hotkeyToggleConnection,
           'hotkeyToggleWindow': _hotkeyToggleWindow,
@@ -355,6 +361,7 @@ class _AxisAppState extends State<AxisApp> {
             _autoStart = newConfig['autoStart'] ?? _autoStart;
             _themeMode = newConfig['themeMode'] ?? _themeMode;
             _useSystemAccent = newConfig['useSystemAccent'] ?? _useSystemAccent;
+            _blurIpEnabled = newConfig['blurIpEnabled'] ?? _blurIpEnabled;
             _favorites = List<String>.from(newConfig['favorites'] ?? _favorites);
             _hotkeyToggleConnection = newConfig['hotkeyToggleConnection'] ?? _hotkeyToggleConnection;
             _hotkeyToggleWindow = newConfig['hotkeyToggleWindow'] ?? _hotkeyToggleWindow;
@@ -392,6 +399,8 @@ class _MainNavigationState extends State<MainNavigation> {
   bool _isConnected = false;
   IpInfo _ipInfo = const IpInfo('...', null);
   String? _selectedServer;
+
+  bool _blurIpEnabled = true;
   String _pingMode = 'tcp';
   String _subscriptionName = '';
   Timer? _updateTimer;
@@ -542,6 +551,7 @@ class _MainNavigationState extends State<MainNavigation> {
     _selectedServer = widget.config['selectedServer'];
     _pingMode = widget.config['pingMode'] ?? 'tcp';
     _subscriptionName = widget.config['subscriptionName'] ?? '';
+    _blurIpEnabled = widget.config['blurIpEnabled'] ?? true;
     _dnsPrimaryController.text = widget.config['dnsPrimary'] ?? '1.1.1.1';
     _dnsSecondaryController.text = widget.config['dnsSecondary'] ?? '8.8.8.8';
     _coreService.applySettings(CoreSettings(
@@ -1054,128 +1064,151 @@ class _MainNavigationState extends State<MainNavigation> {
           ),
           const SizedBox(height: 28),
           Center(
-            child: Card(
+            child: IntrinsicWidth(
+              child: Card(
                 elevation: 0,
-                color: cs.secondaryContainer.withValues(alpha: 0.42),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                color: cs.secondaryContainer.withValues(alpha: 0.38),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  side: BorderSide(
+                    color: cs.outlineVariant.withValues(alpha: 0.35),
+                    width: 1,
+                  ),
+                ),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-                  child: Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (_selectedServer != null)
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if ((_displayCountryCodeFromRaw(_selectedServer!) ?? '').length == 2)
-                                Padding(
-                                  padding: const EdgeInsets.only(right: 10),
-                                  child: Text(
-                                    _countryCodeToEmoji(_displayCountryCodeFromRaw(_selectedServer!)!),
-                                    style: const TextStyle(fontSize: 22),
-                                  ),
-                                ),
-                              Text(
-                                _displayServerNameFromRaw(_selectedServer!),
-                                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
-                              ),
-                            ],
-                          )
-                        else
-                          Text(s.selectServer, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
-                        const SizedBox(height: 6),
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (_selectedServer != null)
                         Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            if (_ipInfo.countryCode != null)
+                            if ((_displayCountryCodeFromRaw(_selectedServer!) ?? '').length == 2)
                               Padding(
-                                padding: const EdgeInsets.only(right: 6),
+                                padding: const EdgeInsets.only(right: 10),
                                 child: Text(
-                                  _countryCodeToEmoji(_ipInfo.countryCode!),
-                                  style: const TextStyle(fontSize: 16),
+                                  _countryCodeToEmoji(_displayCountryCodeFromRaw(_selectedServer!)!),
+                                  style: const TextStyle(fontSize: 22),
                                 ),
                               ),
-                            Builder(
-                              builder: (_) {
-                                final ip = _ipInfo.ip.trim();
-                                final hasRealIp = ip.isNotEmpty && ip != "..." && ip != s.disconnected;
-                                if (!hasRealIp) {
-                                  return Text(
-                                    s.disconnected,
-                                    style: TextStyle(
-                                      color: cs.primary,
-                                      fontFamily: Platform.isWindows ? 'Consolas' : 'monospace',
-                                      fontSize: 13.5,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  );
-                                }
-                                final isConnected = _isConnected;
-                                final hoverTarget = _isIpHovered ? 1.0 : 0.0;
-                                final canBlur = isConnected;
-                                return MouseRegion(
-                                  cursor: SystemMouseCursors.click,
-                                  onEnter: (_) => setState(() => _isIpHovered = true),
-                                  onExit: (_) => setState(() => _isIpHovered = false),
-                                  child: TweenAnimationBuilder<double>(
-                                    duration: const Duration(milliseconds: 220),
-                                    curve: Curves.easeOutCubic,
-                                    tween: Tween<double>(begin: 0, end: canBlur ? hoverTarget : 1.0),
+                            Text(
+                              _displayServerNameFromRaw(_selectedServer!),
+                              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                            ),
+                          ],
+                        )
+                      else
+                        Text(
+                          s.selectServer,
+                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                        ),
+                      const SizedBox(height: 6),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          if (_ipInfo.countryCode != null)
+                            Padding(
+                              padding: const EdgeInsets.only(right: 6),
+                              child: Text(
+                                _countryCodeToEmoji(_ipInfo.countryCode!),
+                                style: const TextStyle(fontSize: 16),
+                              ),
+                            ),
+                          Builder(
+                            builder: (_) {
+                              if (!_isConnected) {
+                                return Text(
+                                  s.disconnected,
+                                  style: TextStyle(
+                                    color: cs.primary,
+                                    fontFamily: GoogleFonts.robotoMono().fontFamily,
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                );
+                              }
+
+                              final ip = _ipInfo.ip.trim();
+                              final hasRealIp = ip.isNotEmpty && ip != "..." && ip != s.disconnected;
+
+                              if (!hasRealIp) {
+                                return Text(
+                                  s.disconnected,
+                                  style: TextStyle(
+                                    color: cs.primary,
+                                    fontFamily: GoogleFonts.robotoMono().fontFamily,
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                );
+                              }
+
+                              final hoverTarget = _isIpHovered ? 1.0 : 0.0;
+                              return MouseRegion(
+                                cursor: SystemMouseCursors.click,
+                                onEnter: (_) => setState(() => _isIpHovered = true),
+                                onExit: (_) => setState(() => _isIpHovered = false),
+                                child: TweenAnimationBuilder<double>(
+                                  duration: const Duration(milliseconds: 220),
+                                  curve: Curves.easeOutCubic,
+                                  tween: Tween<double>(begin: 0, end: _isConnected ? hoverTarget : 1.0),
                                     builder: (ctx, hoverT, _) {
-                                      final frostedBlurSigma = canBlur ? (lerpDouble(12, 0.0, hoverT) ?? 0.0) : 0.0;
-                                      final textBlurSigma = canBlur ? (lerpDouble(10, 0.0, hoverT) ?? 0.0) : 0.0;
-                                      final frostedAlpha = canBlur ? (lerpDouble(0.12, 0.06, hoverT) ?? 0.06) : 0.06;
-                                      final textOpacity = canBlur ? (lerpDouble(0.85, 1.0, hoverT) ?? 1.0) : 1.0;
-                                      return ClipRRect(
-                                        borderRadius: BorderRadius.circular(10),
-                                        child: BackdropFilter(
-                                          filter: ImageFilter.blur(
-                                            sigmaX: frostedBlurSigma,
-                                            sigmaY: frostedBlurSigma,
+                                    final canBlur = _isConnected && (_blurIpEnabled);
+                                    final frostedBlurSigma = canBlur ? (lerpDouble(12, 0.0, hoverT) ?? 0.0) : 0.0;
+                                    final textBlurSigma = canBlur ? (lerpDouble(10, 0.0, hoverT) ?? 0.0) : 0.0;
+                                    final frostedAlpha = canBlur ? (lerpDouble(0.12, 0.06, hoverT) ?? 0.06) : 0.06;
+                                    final textOpacity = canBlur ? (lerpDouble(0.85, 1.0, hoverT) ?? 1.0) : 1.0;
+
+                                    return ClipRRect(
+                                      borderRadius: BorderRadius.circular(10),
+                                      child: BackdropFilter(
+                                        filter: ImageFilter.blur(
+                                          sigmaX: frostedBlurSigma,
+                                          sigmaY: frostedBlurSigma,
+                                        ),
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                          decoration: BoxDecoration(
+                                            color: cs.surfaceContainerHighest.withValues(alpha: frostedAlpha),
+                                            borderRadius: BorderRadius.circular(10),
                                           ),
-                                          child: Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                            decoration: BoxDecoration(
-                                              color: cs.surfaceContainerHighest.withValues(alpha: frostedAlpha),
-                                              borderRadius: BorderRadius.circular(10),
-                                            ),
-                                            child: Center(
-                                              child: Opacity(
-                                                opacity: textOpacity,
-                                                child: ImageFiltered(
-                                                  imageFilter: ImageFilter.blur(
-                                                    sigmaX: textBlurSigma,
-                                                    sigmaY: textBlurSigma,
-                                                  ),
-                                                  child: Text(
-                                                    ip,
-                                                    style: TextStyle(
-                                                      color: cs.primary,
-                                                      fontFamily: Platform.isWindows ? 'Consolas' : 'monospace',
-                                                      fontSize: 13.5,
-                                                      fontWeight: FontWeight.w600,
-                                                      letterSpacing: 0.2,
-                                                    ),
+                                          child: Center(
+                                            child: Opacity(
+                                              opacity: textOpacity,
+                                              child: ImageFiltered(
+                                                imageFilter: ImageFilter.blur(
+                                                  sigmaX: textBlurSigma,
+                                                  sigmaY: textBlurSigma,
+                                                ),
+                                                child: Text(
+                                                  ip,
+                                                  style: TextStyle(
+                                                    color: cs.primary,
+                                                    fontFamily: GoogleFonts.robotoMono().fontFamily,
+                                                    fontSize: 13.5,
+                                                    fontWeight: FontWeight.w600,
+                                                    letterSpacing: 0.2,
                                                   ),
                                                 ),
                                               ),
                                             ),
                                           ),
                                         ),
-                                      );
-                                    },
-                                  ),
-                                );
-                              },
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
               ),
+            ),
           ),
           AnimatedSize(
             duration: const Duration(milliseconds: 300),
