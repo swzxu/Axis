@@ -6,9 +6,11 @@ list(APPEND FLUTTER_PLUGIN_LIST
   hotkey_manager_windows
   system_tray
   url_launcher_windows
+  windows_notification
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST
+  jni
 )
 
 set(PLUGIN_BUNDLED_LIBRARIES)

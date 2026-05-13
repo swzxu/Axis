@@ -1,7 +1,7 @@
 name: axis
 description: Axis proxy client for Windows.
 publish_to: 'none'
-version: 1.3.0+130
+version: 1.3.1+131
 
 environment:
   sdk: ^3.11.5
@@ -14,15 +14,18 @@ dependencies:
   flutter_colorpicker: ^1.1.0
   system_tray: ^2.0.3
   url_launcher: ^6.3.2
-  country_flags: ^4.1.2
   hotkey_manager: ^0.2.0
+  country_flags: ^4.1.2
+  qr_flutter: ^4.1.0
+  windows_notification: ^1.3.0
+  google_fonts: ^6.2.1
 
 dev_dependencies:
   flutter_lints: ^6.0.0
   flutter_launcher_icons: ^0.13.1
 
 flutter_launcher_icons:
-  image_path: "assets/axis_icon.png" # твой исходник
+  image_path: "assets/axis_icon.png"
   windows:
     generate: true
     icon_size: 256  
@@ -32,8 +35,7 @@ flutter:
   assets:
     - assets/bin/mihomo.exe
     - assets/bin/wintun.dll
-    - assets/shield.ico
-    - assets/shield.png
+    - assets/axis_icon.png
     - assets/tray_connected.ico
     - assets/tray_disconnected.ico
     - assets/axis_icon.svg

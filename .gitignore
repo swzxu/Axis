@@ -7,7 +7,8 @@
 build/
 coverage/
 doc/api/
-
+.openclaude/
+.sixth/
 # IDE / Editor
 .idea/
 .vscode/

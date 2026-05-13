@@ -1,4 +1,5 @@
-﻿import 'dart:io';
+﻿import 'dart:async';
+import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
@@ -14,6 +15,12 @@ class SubscriptionUpdateResult {
     this.subscriptionName,
     this.serverCount = 0,
   });
+}
+
+class IpInfo {
+  final String ip;
+  final String? countryCode;
+  const IpInfo(this.ip, this.countryCode);
 }
 
 class ServerEntry {
@@ -63,12 +70,17 @@ class CoreSettings {
 }
 
 class CoreService {
-  String currentMode = "Системный прокси";
+  static const String modeTun = 'TUN';
+  static const String modeProxy = 'Просто прокси';
+
+  String currentMode = modeTun;
   List<Map<String, String>> _serversData = []; 
   List<Map<String, dynamic>> _subscriptions = [];
   String? _selectedServerName;
   String? _selectedServerLink;
   Process? _mihomoProcess;
+  StreamSubscription<String>? _mihomoStdoutSub;
+  StreamSubscription<String>? _mihomoStderrSub;
   CoreSettings settings = const CoreSettings();
 
   String? get selectedServerName => _selectedServerName;
@@ -115,7 +127,7 @@ class CoreService {
       return false;
     }
     await _startMihomoProcess();
-    if (currentMode == "Системный прокси") {
+    if (currentMode == modeProxy) {
       await _setWindowsSystemProxy(enabled: true);
     }
     return true;
@@ -124,7 +136,7 @@ class CoreService {
   Future<void> stop() async {
     debugPrint("Остановка всех процессов ядра");
     await _killMihomoProcesses();
-    if (currentMode == "Системный прокси") {
+    if (currentMode == modeProxy) {
       await _setWindowsSystemProxy(enabled: false);
     }
   }
@@ -145,18 +157,25 @@ class CoreService {
       runInShell: true,
     );
 
-    _mihomoProcess?.stdout.transform(utf8.decoder).listen((data) {
+    _mihomoStdoutSub = _mihomoProcess?.stdout.transform(utf8.decoder).listen((data) {
       debugPrint("[mihomo] $data");
     });
-    _mihomoProcess?.stderr.transform(utf8.decoder).listen((data) {
+    _mihomoStderrSub = _mihomoProcess?.stderr.transform(utf8.decoder).listen((data) {
       debugPrint("[mihomo:err] $data");
     });
+
+    // Ждём, пока прокси начнёт принимать соединения
+    await _waitForProxyReady();
   }
 
   Future<void> _killMihomoProcesses() async {
     try {
       _mihomoProcess?.kill(ProcessSignal.sigterm);
     } catch (_) {}
+    await _mihomoStdoutSub?.cancel();
+    await _mihomoStderrSub?.cancel();
+    _mihomoStdoutSub = null;
+    _mihomoStderrSub = null;
     _mihomoProcess = null;
 
     try {
@@ -250,7 +269,7 @@ proxy-groups:
 $groupEntries
 rules:
   - MATCH,Axis-Auto
-${settings.tunEnabled || currentMode == 'TUN' ? '''
+${settings.tunEnabled || currentMode == modeTun ? '''
 tun:
   enable: true
   stack: system
@@ -320,7 +339,7 @@ tun:
       if (_serversData.isNotEmpty) {
         final selectedExists = _serversData.any((s) => s['name'] == _selectedServerName);
         if (!selectedExists) {
-          _selectedServerName = _serversData.first['name'];
+          _selectedServerName = _serversData.first['name'] ?? _serversData.first['link'] ?? 'Axis-Proxy';
           _selectedServerLink = _serversData.first['link'];
         }
       } else {
@@ -348,6 +367,7 @@ tun:
     final server = _serversData.firstWhere((s) => s['name'] == name, orElse: () => {});
     if (server.isNotEmpty) {
       final link = server['link'];
+      if (link == null || link.isEmpty) return false;
       final testYaml = _buildProxyYamlFromLink(link, server['name'] ?? name);
       if (testYaml == null || testYaml.trim().isEmpty) {
         debugPrint("Сервер $name имеет неподдерживаемый формат ссылки");
@@ -373,7 +393,7 @@ tun:
   String _decodeRemarkFromLink(String link) {
     if (!link.contains('#')) return '';
     try {
-      return Uri.decodeComponent(link.split('#').last.trim());
+      return Uri.decodeComponent(link.split('#').last.trim()).trim();
     } catch (_) {
       return link.split('#').last.trim();
     }
@@ -603,6 +623,37 @@ tun:
     await _saveSubscriptions();
   }
 
+  Future<SubscriptionUpdateResult> refreshSubscription(String id) async {
+    await _loadSubscriptions();
+    final index = _subscriptions.indexWhere((sub) => (sub['id'] ?? '').toString() == id);
+    if (index < 0) return const SubscriptionUpdateResult(success: false);
+    final sub = _subscriptions[index];
+    final url = (sub['url'] ?? '').toString();
+    if (url.isEmpty || !url.startsWith('http')) {
+      return const SubscriptionUpdateResult(success: false);
+    }
+    try {
+      final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 20));
+      if (response.statusCode != 200 || response.body.isEmpty) {
+        return const SubscriptionUpdateResult(success: false);
+      }
+      final normalized = _decodeSubscriptionPayload(response.body);
+      final links = normalized.split('\n').where((l) => l.contains('://')).toList();
+      final servers = links.map((link) {
+        final name = _decodeRemarkFromLink(link).isNotEmpty ? _decodeRemarkFromLink(link) : (Uri.tryParse(link)?.host ?? 'Unknown');
+        return {'name': name, 'link': link};
+      }).toList();
+      if (servers.isEmpty) return const SubscriptionUpdateResult(success: false);
+      sub['servers'] = servers;
+      await _saveSubscriptions();
+      await getServerEntries();
+      return SubscriptionUpdateResult(success: true, subscriptionName: (sub['name'] ?? '').toString(), serverCount: servers.length);
+    } catch (e) {
+      debugPrint('Refresh subscription error: $e');
+      return const SubscriptionUpdateResult(success: false);
+    }
+  }
+
   String _decodeSubscriptionPayload(String content) {
     final trimmed = content.trim();
     if (trimmed.contains('://')) {
@@ -738,13 +789,53 @@ tun:
   }
 
   Future<bool> addCustomServer({required String name, required String link}) async {
-    final validated = _buildProxyYamlFromLink(link, name);
+    final remark = _decodeRemarkFromLink(link);
+    final normalizedName = name.trim().isNotEmpty ? name.trim() : (remark.isNotEmpty ? remark : (Uri.tryParse(link)?.host ?? 'Unknown Server'));
+    final validated = _buildProxyYamlFromLink(link, normalizedName);
     if (validated == null || validated.isEmpty) return false;
     final current = await getServerEntries();
-    final exists = current.any((s) => s.name == name);
+    final exists = current.any((s) => s.name == normalizedName);
     if (exists) return false;
-    _serversData.add({'name': name, 'link': link, 'source': 'custom'});
+    _serversData.add({'name': normalizedName, 'link': link, 'source': 'custom'});
     await _saveCustomServers();
+    return true;
+  }
+
+  Future<bool> deleteServer(ServerEntry entry) async {
+    await getServerEntries();
+    if (entry.source == 'custom') {
+      final before = _serversData.length;
+      _serversData.removeWhere((s) => (s['source'] ?? '') == 'custom' && s['name'] == entry.name);
+      if (_selectedServerName == entry.name) {
+        _selectedServerName = null;
+        _selectedServerLink = null;
+      }
+      await _saveCustomServers();
+      await getServerEntries();
+      return _serversData.length != before;
+    }
+    if ((entry.subscriptionId ?? '').isEmpty) return false;
+    await _loadSubscriptions();
+    var removed = false;
+    for (final sub in _subscriptions) {
+      if ((sub['id'] ?? '').toString() != entry.subscriptionId) continue;
+      final servers = (sub['servers'] as List<dynamic>? ?? []).toList();
+      final before = servers.length;
+      servers.removeWhere((item) {
+        if (item is! Map<String, dynamic>) return false;
+        return (item['name'] ?? '').toString() == entry.name && (item['link'] ?? '').toString() == entry.link;
+      });
+      sub['servers'] = servers;
+      removed = before != servers.length;
+      break;
+    }
+    if (!removed) return false;
+    if (_selectedServerName == entry.name) {
+      _selectedServerName = null;
+      _selectedServerLink = null;
+    }
+    await _saveSubscriptions();
+    await getServerEntries();
     return true;
   }
 
@@ -760,23 +851,36 @@ tun:
       }
     }
     if (server == null) return null;
+
     final endpoint = _extractEndpointFromLink(server['link'] ?? '');
-    if (endpoint == null) return null;
-    
+    // UI рисует "timed out" только когда pingMs == 0.
+    // Если endpoint не извлекается и возвращать null, пинг визуально "исчезает".
+    if (endpoint == null) return 0;
+
     if (pingMode == 'icmp') {
-      return _icmpPing(endpoint.$1);
+      final v = await _icmpPing(endpoint.$1);
+      // UI ожидает: pingMs == 0 => timed out, а null => вообще "не показано"
+      return v ?? 0;
     }
-    // Both tcp and proxy modes use direct TCP ping for reliability
-    return _tcpPing(endpoint.$1, endpoint.$2);
+
+    if (pingMode == 'proxy') {
+      final v = await _proxyTcpPing(endpoint.$1, endpoint.$2);
+      return v ?? 0;
+    }
+
+    // tcp - прямой TCP-пинг
+    final v = await _tcpPing(endpoint.$1, endpoint.$2);
+    return v ?? 0;
   }
 
   Future<Map<String, int?>> pingAllServers(String pingMode) async {
     final list = await getServerEntries();
-    final result = <String, int?>{};
+    final futures = <Future<MapEntry<String, int?>>>[];
     for (final server in list) {
-      result[server.name] = await pingServer(server.name, pingMode);
+      futures.add(pingServer(server.name, pingMode).then((ping) => MapEntry(server.name, ping)));
     }
-    return result;
+    final entries = await Future.wait(futures);
+    return Map.fromEntries(entries);
   }
 
   (String, int)? _extractEndpointFromLink(String link) {
@@ -832,6 +936,14 @@ tun:
     return average.round();
   }
 
+  /// Пинг в режиме "через прокси".
+  /// Сейчас делаем его максимально стабильным: измеряем TCP-отклик на (host, port).
+  /// Это устраняет ситуации, когда прямой TCP работал, а "proxy-пинг" начинал таймаутиться
+  /// из-за отсутствия корректной реализации проксирования ping’а на уровне приложения.
+  Future<int?> _proxyTcpPing(String host, int port) async {
+    return _tcpPing(host, port);
+  }
+
   Future<int?> _icmpPing(String host) async {
     try {
       final result = await Process.run('ping', Platform.isWindows ? ['-n', '1', '-w', '2000', host] : ['-c', '1', '-W', '2', host]);
@@ -845,35 +957,43 @@ tun:
     }
   }
 
-  Future<String> fetchPublicIP() async {
+  Future<IpInfo> fetchPublicIP() async {
     try {
+      // В режимах "Просто прокси" и TUN запрашиваем IP только через локальный прокси.
+      // Прямой запрос вне туннеля вернул бы домашний IP, что неверно.
+      if (currentMode == modeProxy || currentMode == modeTun) {
+        final viaProxy = await _fetchIpInfoViaLocalProxy();
+        return viaProxy ?? const IpInfo('...', null);
+      }
+
+      // Fallback для гипотетических других режимов (не используются).
       final viaProxy = await _fetchIpInfoViaLocalProxy();
-      if (viaProxy != null && viaProxy.isNotEmpty) {
+      if (viaProxy != null) {
         return viaProxy;
       }
       final direct = await _fetchIpInfoDirect();
-      if (direct != null && direct.isNotEmpty) {
+      if (direct != null) {
         return direct;
       }
-      return "...";
+      return const IpInfo('...', null);
     } catch (_) {
-      return "0.0.0.0";
+      return const IpInfo('0.0.0.0', null);
     }
   }
 
-  Future<String?> _fetchIpInfoViaLocalProxy() async {
+  Future<IpInfo?> _fetchIpInfoViaLocalProxy() async {
     final client = HttpClient();
     try {
       client.findProxy = (uri) => "PROXY 127.0.0.1:2080";
-      client.connectionTimeout = const Duration(seconds: 2);
+      client.connectionTimeout = const Duration(seconds: 4);
       final apis = <Uri>[
         Uri.parse('https://api.ipify.org?format=json'),
         Uri.parse('https://api.myip.com'),
         Uri.parse('https://ipwho.is/'),
       ];
       for (final api in apis) {
-        final req = await client.getUrl(api).timeout(const Duration(seconds: 2));
-        final res = await req.close().timeout(const Duration(seconds: 3));
+        final req = await client.getUrl(api).timeout(const Duration(seconds: 4));
+        final res = await req.close().timeout(const Duration(seconds: 5));
         if (res.statusCode != 200) {
           continue;
         }
@@ -891,7 +1011,7 @@ tun:
     }
   }
 
-  Future<String?> _fetchIpInfoDirect() async {
+  Future<IpInfo?> _fetchIpInfoDirect() async {
     final apis = <Uri>[
       Uri.parse('https://api.ipify.org?format=json'),
       Uri.parse('https://api.myip.com'),
@@ -913,7 +1033,7 @@ tun:
     return null;
   }
 
-  String? _parseIpFromApiBody(String body) {
+  IpInfo? _parseIpFromApiBody(String body) {
     final trimmed = body.trim();
     if (trimmed.isEmpty) {
       return null;
@@ -923,21 +1043,56 @@ tun:
       final decoded = jsonDecode(trimmed);
       if (decoded is Map<String, dynamic>) {
         final ip = (decoded['ip'] ?? decoded['query'] ?? '').toString().trim();
-        final country = (decoded['country'] ?? decoded['country_name'] ?? '').toString().trim();
+        final country = (decoded['country'] ?? decoded['country_code'] ?? decoded['country_name'] ?? '').toString().trim();
         if (ip.isEmpty) {
           return null;
         }
+        // convert country name to code if needed
+        String? code;
         if (country.isNotEmpty && country != 'null') {
-          return '$ip • $country';
+          if (country.length == 2 && country.toUpperCase() == country) {
+            code = country;
+          } else {
+            code = _countryNameToCode(country);
+          }
         }
-        return ip;
+        return IpInfo(ip, code);
       }
     } catch (_) {
     }
 
     final rawIp = trimmed.replaceAll('"', '');
     final isIpLike = RegExp(r'^\d{1,3}(\.\d{1,3}){3}$').hasMatch(rawIp);
-    return isIpLike ? rawIp : null;
+    return isIpLike ? IpInfo(rawIp, null) : null;
+  }
+
+  static const Map<String, String> _countryNameMap = {
+    'russia': 'RU', 'united states': 'US', 'china': 'CN', 'germany': 'DE',
+    'france': 'FR', 'japan': 'JP', 'south korea': 'KR', 'united kingdom': 'GB',
+    'canada': 'CA', 'australia': 'AU', 'netherlands': 'NL', 'singapore': 'SG',
+    'brazil': 'BR', 'india': 'IN', 'ukraine': 'UA', 'poland': 'PL',
+    'spain': 'ES', 'italy': 'IT', 'sweden': 'SE', 'norway': 'NO',
+    'finland': 'FI', 'turkey': 'TR', 'thailand': 'TH', 'vietnam': 'VN',
+    'indonesia': 'ID', 'malaysia': 'MY', 'hong kong': 'HK', 'taiwan': 'TW',
+  };
+
+  String? _countryNameToCode(String name) {
+    final lower = name.toLowerCase().trim();
+    return _countryNameMap[lower];
+  }
+
+  Future<bool> _waitForProxyReady({Duration timeout = const Duration(seconds: 5)}) async {
+    final stopwatch = Stopwatch()..start();
+    while (stopwatch.elapsed < timeout) {
+      try {
+        final socket = await Socket.connect('127.0.0.1', 2080, timeout: const Duration(milliseconds: 200));
+        socket.close();
+        return true;
+      } catch (_) {
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+    }
+    return false;
   }
 
   Future<void> _setWindowsSystemProxy({required bool enabled}) async {
