@@ -378,15 +378,118 @@ class _AxisAppState extends State<AxisApp> {
   }
 }
 
+class CustomExpansionTile extends StatefulWidget {
+  final Widget title;
+  final Widget? subtitle;
+  final Widget? trailing;
+  final List<Widget> children;
+  final bool initiallyExpanded;
+  final Color? backgroundColor;
+  final Color? collapsedBackgroundColor;
+  final EdgeInsetsGeometry tilePadding;
+  final EdgeInsetsGeometry childrenPadding;
+
+  const CustomExpansionTile({
+    super.key,
+    required this.title,
+    this.subtitle,
+    this.trailing,
+    required this.children,
+    this.initiallyExpanded = false,
+    this.backgroundColor,
+    this.collapsedBackgroundColor,
+    this.tilePadding = const EdgeInsets.symmetric(horizontal: 16),
+    this.childrenPadding = const EdgeInsets.fromLTRB(8, 0, 8, 8),
+  });
+
+  @override
+  State<CustomExpansionTile> createState() => _CustomExpansionTileState();
+}
+
+class _CustomExpansionTileState extends State<CustomExpansionTile>
+    with SingleTickerProviderStateMixin {
+  late bool _expanded;
+  late AnimationController _controller;
+  late Animation<double> _rotationAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _expanded = widget.initiallyExpanded;
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 200),
+      vsync: this,
+    );
+    _rotationAnimation = Tween<double>(begin: 0, end: 0.5).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+    );
+    if (_expanded) _controller.value = 1.0;
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _toggle() {
+    setState(() {
+      _expanded = !_expanded;
+      if (_expanded) {
+        _controller.forward();
+      } else {
+        _controller.reverse();
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ListTile(
+            contentPadding: widget.tilePadding,
+            title: widget.title,
+            subtitle: widget.subtitle,
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (widget.trailing != null) widget.trailing!,
+                RotationTransition(
+                  turns: _rotationAnimation,
+                  child: Icon(Icons.expand_more, color: cs.onSurfaceVariant),
+                ),
+              ],
+            ),
+            onTap: _toggle,
+          ),
+          AnimatedCrossFade(
+            firstChild: const SizedBox.shrink(),
+            secondChild: Padding(
+              padding: widget.childrenPadding,
+              child: Column(children: widget.children),
+            ),
+            crossFadeState: _expanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+            duration: const Duration(milliseconds: 200),
+            sizeCurve: Curves.easeInOut,
+          ),
+        ],
+      );
+
+  }
+}
+
 class MainNavigation extends StatefulWidget {
   final Map<String, dynamic> config;
   final Function(Map<String, dynamic>) onConfigChange;
   final Function(Color) onColorChange;
 
   const MainNavigation({
-    super.key, 
-    required this.config, 
-    required this.onConfigChange, 
+    super.key,
+    required this.config,
+    required this.onConfigChange,
     required this.onColorChange
   });
 
@@ -564,6 +667,14 @@ class _MainNavigationState extends State<MainNavigation> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initializeBackgroundServices();
     });
+  }
+
+  @override
+  void dispose() {
+    _updateTimer?.cancel();
+    _dnsPrimaryController.dispose();
+    _dnsSecondaryController.dispose();
+    super.dispose();
   }
 
   Future<void> _initializeBackgroundServices() async {
@@ -841,12 +952,18 @@ class _MainNavigationState extends State<MainNavigation> {
     if (!Platform.isWindows) return;
     try {
       final uniqueId = DateTime.now().millisecondsSinceEpoch.toString();
+
+      // Надёжный путь к файлу иконки: иконка должна быть file path на диске.
+      // Мы пакуем её через pubspec.yaml в flutter_assets, как это делается и для tray.
+      final iconPath = _trayIconPath('assets/notify.png');
+
       final notificationMessage = NotificationMessage.fromPluginTemplate(
         uniqueId,
         title,
         message,
-         image: _trayIconPath('/windows/runner/resources/app_icon.ico')
+        image: iconPath,
       );
+
       await _windowsNotification.showNotificationPluginTemplate(notificationMessage);
     } catch (e) {
       debugPrint('Windows notification error: $e');
@@ -937,8 +1054,22 @@ class _MainNavigationState extends State<MainNavigation> {
         );
         return;
       }
-      final ipInfo = await _coreService.fetchPublicIP();
-      _ipInfo = ipInfo;
+
+      // Ждём, пока IP определится, с повторными попытками
+      const int attempts = 6;
+      const Duration delay = Duration(milliseconds: 500);
+      IpInfo? ipInfo;
+      for (int i = 0; i < attempts; i++) {
+        final candidate = await _coreService.fetchPublicIP();
+        if (!mounted) return;
+        final candidateIp = candidate.ip.trim();
+        if (candidateIp.isNotEmpty && candidateIp != '...') {
+          ipInfo = candidate;
+          break;
+        }
+        if (i < attempts - 1) await Future.delayed(delay);
+      }
+      _ipInfo = ipInfo ?? const IpInfo('...', null);
       _showWindowsNotification(s.vpnActive, _selectedServer ?? s.vpnActive);
       setState(() {});
     }
@@ -1317,7 +1448,7 @@ class _MainNavigationState extends State<MainNavigation> {
               builder: (context, customSnap) {
                 final customList = (customSnap.data ?? const <ServerEntry>[]).where((e) => e.source == 'custom').toList();
                 return ListView(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                   children: [
                     ...groups.map((group) {
                       final list = [...group.servers];
@@ -1329,9 +1460,12 @@ class _MainNavigationState extends State<MainNavigation> {
                         list.sort((a, b) => (_pingByServer[a.name] ?? 999999).compareTo(_pingByServer[b.name] ?? 999999));
                       }
                       return Card(
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                        child: ExpansionTile(
+                        elevation: 2,
+                        clipBehavior: Clip.antiAlias,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: CustomExpansionTile(
                           title: Text(group.name),
                           subtitle: Text('${list.length} ${s.proxiesCount}'),
                           trailing: Row(
@@ -1355,10 +1489,16 @@ class _MainNavigationState extends State<MainNavigation> {
                     }),
                     if (customList.isNotEmpty)
                       Card(
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                        child: ExpansionTile(
+                        elevation: 2,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: CustomExpansionTile(
                           initiallyExpanded: true,
+                          backgroundColor: cs.surface,
+                          collapsedBackgroundColor: cs.surface,
+                          tilePadding: EdgeInsets.zero,
+                          childrenPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                           title: Text(s.customServers),
                           subtitle: Text('${customList.length} ${s.proxiesCount}'),
                           children: customList.where((e) => !_showFavoritesOnly || favorites.contains(e.name)).map((entry) => _proxyTile(entry, cs)).toList(),
@@ -1382,7 +1522,7 @@ class _MainNavigationState extends State<MainNavigation> {
     return GestureDetector(
       onSecondaryTapDown: (details) => _showServerContextMenu(entry, details.globalPosition),
       child: Card(
-        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         elevation: isSelected ? 2 : 0,
         color: isSelected ? cs.primaryContainer : cs.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -1446,6 +1586,9 @@ class _MainNavigationState extends State<MainNavigation> {
               return;
             }
             if (_isConnected) {
+              // Гарантированный рестарт ядра при смене сервера:
+              // иначе иногда config обновляется, но процесс/стек остаётся со старым.
+              await _coreService.stop();
               final started = await _coreService.initAndStart();
               if (!mounted) return;
               if (!started) {
@@ -1460,7 +1603,29 @@ class _MainNavigationState extends State<MainNavigation> {
               }
             }
             _emitConfigChange({...widget.config, 'selectedServer': entry.name});
-            _ipInfo = await _coreService.fetchPublicIP();
+
+            // Ждём, пока mihomo реально подхватит новый конфиг и внешний IP сменится,
+            // иначе в UI иногда остаётся старый IP.
+            final previousIp = _ipInfo.ip;
+
+            const int attempts = 8;
+            const Duration delay = Duration(milliseconds: 350);
+
+            IpInfo? latest;
+            for (int i = 0; i < attempts; i++) {
+              final candidate = await _coreService.fetchPublicIP();
+              if (!mounted) return;
+
+              final candidateIp = candidate.ip.trim();
+              if (candidateIp.isNotEmpty && candidateIp != '...' && previousIp.trim() != candidateIp) {
+                latest = candidate;
+                break;
+              }
+              latest = candidate;
+              await Future.delayed(delay);
+            }
+
+            _ipInfo = latest ?? await _coreService.fetchPublicIP();
             if (!mounted) return;
             setState(() {});
           },
@@ -1567,7 +1732,7 @@ class _MainNavigationState extends State<MainNavigation> {
           child: Icon(Icons.info_outline, color: cs.primary),
         ),
         title: Text(s.about, style: const TextStyle(fontWeight: FontWeight.w500)),
-        subtitle: const Text("Axis v1.3.1"),
+        subtitle: const Text("Axis v1.3.1-rc1"),
         trailing: Icon(Icons.open_in_new_rounded, size: 22, color: cs.onSurfaceVariant),
         onTap: () async {
           final Uri url = Uri.parse('https://github.com/swzxu/axis');

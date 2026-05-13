@@ -163,6 +163,9 @@ class CoreService {
     _mihomoStderrSub = _mihomoProcess?.stderr.transform(utf8.decoder).listen((data) {
       debugPrint("[mihomo:err] $data");
     });
+
+    // Ждём, пока прокси начнёт принимать соединения
+    await _waitForProxyReady();
   }
 
   Future<void> _killMihomoProcesses() async {
@@ -848,14 +851,26 @@ tun:
       }
     }
     if (server == null) return null;
+
     final endpoint = _extractEndpointFromLink(server['link'] ?? '');
-    if (endpoint == null) return null;
-    
+    // UI рисует "timed out" только когда pingMs == 0.
+    // Если endpoint не извлекается и возвращать null, пинг визуально "исчезает".
+    if (endpoint == null) return 0;
+
     if (pingMode == 'icmp') {
-      return _icmpPing(endpoint.$1);
+      final v = await _icmpPing(endpoint.$1);
+      // UI ожидает: pingMs == 0 => timed out, а null => вообще "не показано"
+      return v ?? 0;
     }
-    // Both tcp and proxy modes use direct TCP ping for reliability
-    return _tcpPing(endpoint.$1, endpoint.$2);
+
+    if (pingMode == 'proxy') {
+      final v = await _proxyTcpPing(endpoint.$1, endpoint.$2);
+      return v ?? 0;
+    }
+
+    // tcp - прямой TCP-пинг
+    final v = await _tcpPing(endpoint.$1, endpoint.$2);
+    return v ?? 0;
   }
 
   Future<Map<String, int?>> pingAllServers(String pingMode) async {
@@ -921,6 +936,14 @@ tun:
     return average.round();
   }
 
+  /// Пинг в режиме "через прокси".
+  /// Сейчас делаем его максимально стабильным: измеряем TCP-отклик на (host, port).
+  /// Это устраняет ситуации, когда прямой TCP работал, а "proxy-пинг" начинал таймаутиться
+  /// из-за отсутствия корректной реализации проксирования ping’а на уровне приложения.
+  Future<int?> _proxyTcpPing(String host, int port) async {
+    return _tcpPing(host, port);
+  }
+
   Future<int?> _icmpPing(String host) async {
     try {
       final result = await Process.run('ping', Platform.isWindows ? ['-n', '1', '-w', '2000', host] : ['-c', '1', '-W', '2', host]);
@@ -936,6 +959,14 @@ tun:
 
   Future<IpInfo> fetchPublicIP() async {
     try {
+      // В режимах "Просто прокси" и TUN запрашиваем IP только через локальный прокси.
+      // Прямой запрос вне туннеля вернул бы домашний IP, что неверно.
+      if (currentMode == modeProxy || currentMode == modeTun) {
+        final viaProxy = await _fetchIpInfoViaLocalProxy();
+        return viaProxy ?? const IpInfo('...', null);
+      }
+
+      // Fallback для гипотетических других режимов (не используются).
       final viaProxy = await _fetchIpInfoViaLocalProxy();
       if (viaProxy != null) {
         return viaProxy;
@@ -954,15 +985,15 @@ tun:
     final client = HttpClient();
     try {
       client.findProxy = (uri) => "PROXY 127.0.0.1:2080";
-      client.connectionTimeout = const Duration(seconds: 2);
+      client.connectionTimeout = const Duration(seconds: 4);
       final apis = <Uri>[
         Uri.parse('https://api.ipify.org?format=json'),
         Uri.parse('https://api.myip.com'),
         Uri.parse('https://ipwho.is/'),
       ];
       for (final api in apis) {
-        final req = await client.getUrl(api).timeout(const Duration(seconds: 2));
-        final res = await req.close().timeout(const Duration(seconds: 3));
+        final req = await client.getUrl(api).timeout(const Duration(seconds: 4));
+        final res = await req.close().timeout(const Duration(seconds: 5));
         if (res.statusCode != 200) {
           continue;
         }
@@ -1048,6 +1079,20 @@ tun:
   String? _countryNameToCode(String name) {
     final lower = name.toLowerCase().trim();
     return _countryNameMap[lower];
+  }
+
+  Future<bool> _waitForProxyReady({Duration timeout = const Duration(seconds: 5)}) async {
+    final stopwatch = Stopwatch()..start();
+    while (stopwatch.elapsed < timeout) {
+      try {
+        final socket = await Socket.connect('127.0.0.1', 2080, timeout: const Duration(milliseconds: 200));
+        socket.close();
+        return true;
+      } catch (_) {
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+    }
+    return false;
   }
 
   Future<void> _setWindowsSystemProxy({required bool enabled}) async {

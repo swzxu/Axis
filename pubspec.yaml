@@ -35,8 +35,7 @@ flutter:
   assets:
     - assets/bin/mihomo.exe
     - assets/bin/wintun.dll
-    - assets/shield.ico
-    - assets/shield.png
+    - assets/axis_icon.png
     - assets/tray_connected.ico
     - assets/tray_disconnected.ico
     - assets/axis_icon.svg

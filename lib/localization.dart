@@ -74,7 +74,7 @@ class AxisStrings {
     unsupportedServerFormat: 'Unsupported server format', switchFailed: 'Switch failed: unsupported server format', adminRightsFailed: 'Failed to request administrator rights for TUN', connectFailed: 'Failed to connect: check server or subscription format',
     deleteServer: 'Delete server', exportServer: 'Export server', copyLink: 'Copy link', qrCode: 'QR code',
     serverDeleted: 'Server deleted', serverDeleteFailed: 'Failed to delete server', linkCopied: 'Link copied',
-    proxiesCount: 'proxies', customServers: 'Custom', subscriptionSource: 'Subscription',
+    proxiesCount: 'servers', customServers: 'Custom', subscriptionSource: 'Subscription',
     syncSubscription: 'Sync subscription', subscriptionSynced: 'Subscription synced', subscriptionSyncFailed: 'Failed to sync subscription',
     timedOut: 'timed out',
   );
@@ -108,8 +108,8 @@ class AxisStrings {
     unsupportedServerFormat: 'Формат ссылки сервера не поддерживается', switchFailed: 'Переключение не удалось: формат сервера не поддерживается', adminRightsFailed: 'Не удалось запросить права администратора для TUN', connectFailed: 'Не удалось подключиться: проверь формат сервера/подписки',
     deleteServer: 'Удалить сервер', exportServer: 'Экспорт сервера', copyLink: 'Скопировать ссылку', qrCode: 'QR-код',
     serverDeleted: 'Сервер удалён', serverDeleteFailed: 'Не удалось удалить сервер', linkCopied: 'Ссылка скопирована',
-    proxiesCount: 'прокси', customServers: 'Пользовательские', subscriptionSource: 'Подписка',
+    proxiesCount: 'серверов', customServers: 'Пользовательские', subscriptionSource: 'Подписка',
     syncSubscription: 'Синхронизировать подписку', subscriptionSynced: 'Подписка синхронизирована', subscriptionSyncFailed: 'Не удалось синхронизировать подписку',
-    timedOut: 'нет ответа',
+    timedOut: 'не отвечает',
   );
 }
