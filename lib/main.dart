@@ -955,7 +955,7 @@ class _MainNavigationState extends State<MainNavigation> {
 
       // Надёжный путь к файлу иконки: иконка должна быть file path на диске.
       // Мы пакуем её через pubspec.yaml в flutter_assets, как это делается и для tray.
-      final iconPath = _trayIconPath('assets/notify.png');
+      final iconPath = _trayIconPath('assets/axis_icon.png');
 
       final notificationMessage = NotificationMessage.fromPluginTemplate(
         uniqueId,
