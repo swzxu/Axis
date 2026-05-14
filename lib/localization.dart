@@ -48,7 +48,7 @@ class AxisStrings {
 
   static AxisStrings en = AxisStrings(
     shieldLabel: 'Axis', serversLabel: 'Servers', settingsLabel: 'Settings',
-    connect: 'CONNECT', disconnect: 'DISCONNECT', selectServer: 'SELECT SERVER',
+    connect: 'CONNECT', disconnect: 'DISCONNECT', selectServer: 'Select server',
     proxyMode: 'Proxy Mode', sysProxy: 'System Proxy', simpleProxy: 'Proxy',
     about: 'ABOUT', appearance: 'APPEARANCE', config: 'CONFIGURATION',
     updateSub: 'UPDATE SUBSCRIPTION', langSwitch: 'Language', showWindow: 'Show Window',
@@ -71,7 +71,7 @@ class AxisStrings {
     interfaceSettingsDesc: 'Theme mode, accent color and appearance',
     cancel: 'Cancel', ok: 'OK', add: 'Add', save: 'Save', name: 'Name', serverLink: 'Link (vless/vmess/ss/...)',
     serverAddFailed: 'Failed to add server', serverAdded: 'Server added', subscriptionAddFailed: 'Failed to add subscription',
-    unsupportedServerFormat: 'Unsupported server format', switchFailed: 'Switch failed: unsupported server format', adminRightsFailed: 'Failed to request administrator rights for TUN', connectFailed: 'Failed to connect: check server or subscription format',
+    unsupportedServerFormat: 'Unsupported server format', switchFailed: 'Switch failed: unsupported server format', adminRightsFailed: 'Failed to request administrator rights for TUN mode', connectFailed: 'Failed to connect: check server or subscription format',
     deleteServer: 'Delete server', exportServer: 'Export server', copyLink: 'Copy link', qrCode: 'QR code',
     serverDeleted: 'Server deleted', serverDeleteFailed: 'Failed to delete server', linkCopied: 'Link copied',
     proxiesCount: 'servers', customServers: 'Custom', subscriptionSource: 'Subscription',
@@ -81,7 +81,7 @@ class AxisStrings {
 
   static AxisStrings ru = AxisStrings(
     shieldLabel: 'Axis', serversLabel: 'Сервера', settingsLabel: 'Настройки',
-    connect: 'ПОДКЛЮЧИТЬ', disconnect: 'ОТКЛЮЧИТЬ', selectServer: 'ВЫБРАТЬ СЕРВЕР',
+    connect: 'ПОДКЛЮЧИТЬ', disconnect: 'ОТКЛЮЧИТЬ', selectServer: 'Сервер не выбран',
     proxyMode: 'Режим прокси', sysProxy: 'Системный прокси', simpleProxy: 'Прокси',
     about: 'О ПРОГРАММЕ', appearance: 'ВНЕШНИЙ ВИД', config: 'КОНФИГУРАЦИЯ',
     updateSub: 'ОБНОВИТЬ ПОДПИСКУ', langSwitch: 'Язык', showWindow: 'Развернуть',
@@ -105,7 +105,7 @@ class AxisStrings {
     interfaceSettingsDesc: 'Тема, акцентный цвет и внешний вид',
     cancel: 'Отмена', ok: 'OK', add: 'Добавить', save: 'Сохранить', name: 'Имя', serverLink: 'Ссылка (vless/vmess/ss/...)',
     serverAddFailed: 'Не удалось добавить сервер', serverAdded: 'Сервер добавлен', subscriptionAddFailed: 'Не удалось добавить подписку',
-    unsupportedServerFormat: 'Формат ссылки сервера не поддерживается', switchFailed: 'Переключение не удалось: формат сервера не поддерживается', adminRightsFailed: 'Не удалось запросить права администратора для TUN', connectFailed: 'Не удалось подключиться: проверь формат сервера/подписки',
+    unsupportedServerFormat: 'Формат ссылки сервера не поддерживается', switchFailed: 'Переключение не удалось: формат сервера не поддерживается', adminRightsFailed: 'Не удалось запросить права администратора для TUN режима', connectFailed: 'Не удалось подключиться: проверь формат сервера/подписки',
     deleteServer: 'Удалить сервер', exportServer: 'Экспорт сервера', copyLink: 'Скопировать ссылку', qrCode: 'QR-код',
     serverDeleted: 'Сервер удалён', serverDeleteFailed: 'Не удалось удалить сервер', linkCopied: 'Ссылка скопирована',
     proxiesCount: 'серверов', customServers: 'Пользовательские', subscriptionSource: 'Подписка',

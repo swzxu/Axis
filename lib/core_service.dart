@@ -801,6 +801,56 @@ tun:
     return true;
   }
 
+  Future<bool> renameCustomServer({
+    required ServerEntry entry,
+    required String newName,
+    required String fallbackNameFromLink,
+  }) async {
+    if (entry.source != 'custom') return false;
+
+    final trimmed = newName.trim();
+    final normalizedName = trimmed.isNotEmpty ? trimmed : fallbackNameFromLink.trim();
+    if (normalizedName.isEmpty) return false;
+
+    // Валидация формата (чтобы не разрешить имя, с которым ссылка не парсится)
+    final validated = _buildProxyYamlFromLink(entry.link, normalizedName);
+    if (validated == null || validated.trim().isEmpty) return false;
+
+    await getServerEntries();
+
+    // Проверяем коллизии имён только среди custom
+    final currentEntries = await getServerEntries();
+    final nameTakenByOther = currentEntries.any(
+      (s) => s.source == 'custom' && s.name == normalizedName && s.link != entry.link,
+    );
+    if (nameTakenByOther) return false;
+
+    final beforeSelectedName = _selectedServerName;
+    final targetName = entry.name;
+
+    var renamed = false;
+    for (final item in _serversData) {
+      if ((item['source'] ?? '') != 'custom') continue;
+      if (item['name'] == targetName && item['link'] == entry.link) {
+        item['name'] = normalizedName;
+        renamed = true;
+        break;
+      }
+    }
+    if (!renamed) return false;
+
+    await _saveCustomServers();
+
+    // обновим локальные поля выбранного сервера, чтобы UI не сломался
+    if (_selectedServerName == beforeSelectedName && beforeSelectedName == entry.name) {
+      _selectedServerName = normalizedName;
+      _selectedServerLink = entry.link;
+      await _generateMihomoConfig();
+    }
+
+    return true;
+  }
+
   Future<bool> deleteServer(ServerEntry entry) async {
     await getServerEntries();
     if (entry.source == 'custom') {

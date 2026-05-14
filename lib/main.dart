@@ -811,6 +811,19 @@ class _MainNavigationState extends State<MainNavigation> {
     return match?.group(1)?.toUpperCase();
   }
 
+  String _proxyTypeFromLink(String link) {
+    final trimmed = link.trim();
+    final scheme = trimmed.split('://').first.toLowerCase();
+    if (scheme.isEmpty) return 'Unknown';
+    if (scheme == 'vmess') return 'VMess';
+    if (scheme == 'vless') return 'VLESS';
+    if (scheme == 'ss') return 'Shadowsocks';
+    if (scheme == 'trojan') return 'Trojan';
+    if (scheme == 'http') return 'HTTP';
+    if (scheme == 'socks') return 'SOCKS';
+    return scheme.toUpperCase();
+  }
+
   Future<void> _showAddServerDialog() async {
     final nameCtrl = TextEditingController();
     final linkCtrl = TextEditingController();
@@ -819,16 +832,14 @@ class _MainNavigationState extends State<MainNavigation> {
       builder: (ctx) => AlertDialog(
         title: Text(s.addServer),
         content: SizedBox(
-          width: 380,
-          child: Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(controller: nameCtrl, decoration: InputDecoration(labelText: s.name)),
-                const SizedBox(height: 10),
-                TextField(controller: linkCtrl, decoration: InputDecoration(labelText: s.serverLink)),
-              ],
-            ),
+          width: 460,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(controller: nameCtrl, decoration: InputDecoration(labelText: s.name)),
+              const SizedBox(height: 10),
+              TextField(controller: linkCtrl, decoration: InputDecoration(labelText: s.serverLink)),
+            ],
           ),
         ),
         actions: [
@@ -1495,9 +1506,6 @@ class _MainNavigationState extends State<MainNavigation> {
                         ),
                         child: CustomExpansionTile(
                           initiallyExpanded: true,
-                          backgroundColor: cs.surface,
-                          collapsedBackgroundColor: cs.surface,
-                          tilePadding: EdgeInsets.zero,
                           childrenPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                           title: Text(s.customServers),
                           subtitle: Text('${customList.length} ${s.proxiesCount}'),
@@ -1528,19 +1536,14 @@ class _MainNavigationState extends State<MainNavigation> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         child: ListTile(
           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          leading: entry.countryCode != null // эта сучка ни в какую не хочет показывать эмодзи, я ебал это делать
-              ? Text(
-                  _countryCodeToEmoji(entry.countryCode!),
-                  style: const TextStyle(fontSize: 28),
-                )
-              : const Padding(
-                  padding: EdgeInsets.only(right: 8),
-                  child: Icon(Icons.public, size: 28),
-                ),
+          leading: const Padding(
+            padding: EdgeInsets.only(right: 8),
+            child: Icon(Icons.public, size: 28),
+          ),
           title: Text(_displayServerName(entry), style: TextStyle(fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500)),
           subtitle: Text(
-            pingMs == null 
-                ? (entry.source == 'custom' ? s.customServers : s.subscriptionSource)
+            pingMs == null
+                ? _proxyTypeFromLink(entry.link)
                 : (pingMs == 0 ? s.timedOut : '$pingMs ms'),
             style: TextStyle(
               color: pingMs == 0 ? Colors.red : cs.onSurfaceVariant,
@@ -1643,6 +1646,15 @@ class _MainNavigationState extends State<MainNavigation> {
           value: 'export',
           child: ListTile(dense: true, leading: const Icon(Icons.ios_share_rounded), title: Text(s.exportServer)),
         ),
+        if (entry.source == 'custom')
+          PopupMenuItem(
+            value: 'rename',
+            child: ListTile(
+              dense: true,
+              leading: const Icon(Icons.edit),
+              title: const Text('Переименовать'),
+            ),
+          ),
         PopupMenuItem(
           value: 'delete',
           child: ListTile(dense: true, leading: const Icon(Icons.delete_outline_rounded), title: Text(s.deleteServer)),
@@ -1652,6 +1664,10 @@ class _MainNavigationState extends State<MainNavigation> {
     if (!mounted) return;
     if (selected == 'export') {
       _showServerExportDialog(entry);
+    } else if (selected == 'rename') {
+      if (entry.source == 'custom') {
+        await _showRenameCustomServerDialog(entry);
+      }
     } else if (selected == 'delete') {
       await _deleteServer(entry);
     }
@@ -1716,6 +1732,61 @@ class _MainNavigationState extends State<MainNavigation> {
     );
   }
 
+  Future<void> _showRenameCustomServerDialog(ServerEntry entry) async {
+    final nameCtrl = TextEditingController(text: entry.name);
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Переименовать'),
+        content: SizedBox(
+          width: 420,
+          child: TextField(
+            controller: nameCtrl,
+            decoration: const InputDecoration(
+              labelText: 'Имя',
+              border: OutlineInputBorder(),
+            ),
+            autofocus: true,
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(s.cancel)),
+          FilledButton(
+            onPressed: () async {
+              final newName = nameCtrl.text.trim();
+              final ok = await _coreService.renameCustomServer(
+                entry: entry,
+                newName: newName,
+                fallbackNameFromLink: _decodeDisplayName(_displayServerNameFromRaw(entry.link)),
+              );
+              if (!ctx.mounted || !mounted) return;
+              Navigator.pop(ctx);
+              if (!ok) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text(s.serverAddFailed)),
+                );
+                return;
+              }
+
+              final favorites = List<String>.from(widget.config['favorites'] as List<String>? ?? []);
+              // Обновим локальный state через полную подгрузку избранного/выбранного
+              if (_selectedServer == entry.name) {
+                setState(() => _selectedServer = newName.isNotEmpty ? newName : entry.name);
+              }
+              if (_selectedServer != null && favorites.contains(entry.name)) {
+                favorites.remove(entry.name);
+                if (newName.isNotEmpty) favorites.add(newName);
+              }
+              _emitConfigChange({...widget.config, 'favorites': favorites, 'selectedServer': _selectedServer});
+              setState(() {});
+            },
+            child: Text(s.save),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _settings(ColorScheme cs) => ListView(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16), children: [
     _sectionHeader(s.about, cs),
     Card(
@@ -1732,7 +1803,7 @@ class _MainNavigationState extends State<MainNavigation> {
           child: Icon(Icons.info_outline, color: cs.primary),
         ),
         title: Text(s.about, style: const TextStyle(fontWeight: FontWeight.w500)),
-        subtitle: const Text("Axis v1.3.1"),
+        subtitle: const Text("Axis v1.3.2"),
         trailing: Icon(Icons.open_in_new_rounded, size: 22, color: cs.onSurfaceVariant),
         onTap: () async {
           final Uri url = Uri.parse('https://github.com/swzxu/axis');
