@@ -42,3 +42,7 @@ Make sure you have [Flutter](https://docs.flutter.dev/get-started/install) insta
 ```bash
 flutter build windows --release
 ```
+or
+```powershell
+.\scripts\release.ps1
+```
