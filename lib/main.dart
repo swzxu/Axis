@@ -1803,7 +1803,7 @@ class _MainNavigationState extends State<MainNavigation> {
           child: Icon(Icons.info_outline, color: cs.primary),
         ),
         title: Text(s.about, style: const TextStyle(fontWeight: FontWeight.w500)),
-        subtitle: const Text("Axis v1.3.2"),
+        subtitle: const Text("Axis v1.4"),
         trailing: Icon(Icons.open_in_new_rounded, size: 22, color: cs.onSurfaceVariant),
         onTap: () async {
           final Uri url = Uri.parse('https://github.com/swzxu/axis');
