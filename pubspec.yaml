@@ -34,10 +34,12 @@ flutter:
   uses-material-design: true
   assets:
     - assets/bin/mihomo.exe
-    - assets/bin/wintun.dll
     - assets/axis_icon.png
+    - assets/notify_icon.png
     - assets/tray_connected.ico
     - assets/tray_disconnected.ico
+    - assets/tray_connected.png
+    - assets/tray_disconnected.png
     - assets/axis_icon.svg
     - assets/axis_icon_connected.svg
     - assets/axis_icon_disconnected.svg

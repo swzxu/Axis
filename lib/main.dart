@@ -950,6 +950,66 @@ class _MainNavigationState extends State<MainNavigation> {
     }
   }
 
+  Future<void> _showSubscriptionContextMenu(SubscriptionGroup group, Offset position) async {
+    final selected = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(position.dx, position.dy, position.dx, position.dy),
+      items: [
+        PopupMenuItem(
+          value: 'sync',
+          child: ListTile(dense: true, leading: const Icon(Icons.sync_rounded), title: Text(s.syncSubscription)),
+        ),
+        PopupMenuItem(
+          value: 'rename',
+          child: ListTile(dense: true, leading: const Icon(Icons.edit), title: Text(s.renameSubscription)),
+        ),
+        PopupMenuItem(
+          value: 'delete',
+          child: ListTile(dense: true, leading: const Icon(Icons.delete_outline_rounded), title: Text(s.deleteSubscription)),
+        ),
+      ],
+    );
+    if (!mounted) return;
+    if (selected == 'sync') {
+      await _refreshSubscription(group);
+    } else if (selected == 'rename') {
+      await _showRenameSubscriptionDialog(group);
+    } else if (selected == 'delete') {
+      await _deleteSubscription(group);
+    }
+  }
+
+  Future<void> _deleteSubscription(SubscriptionGroup group) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(s.deleteSubscription),
+        content: Text(group.name),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(s.cancel)),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text(s.deleteSubscription)),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    final ok = await _coreService.deleteSubscription(group.id);
+    if (!mounted) return;
+    if (ok) {
+      final favorites = List<String>.from(widget.config['favorites'] as List<String>? ?? []);
+      final removedNames = group.servers.map((e) => e.name).toSet();
+      favorites.removeWhere(removedNames.contains);
+      if (_selectedServer != null && removedNames.contains(_selectedServer)) {
+        _selectedServer = null;
+        _ipInfo = IpInfo(s.disconnected, null);
+      }
+      _emitConfigChange({...widget.config, 'favorites': favorites, 'selectedServer': _selectedServer});
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s.subscriptionDeleted)));
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s.subscriptionDeleteFailed)));
+    }
+  }
+
   late final WindowsNotification _windowsNotification;
 
   Future<void> _initWindowsNotification() async {
@@ -957,29 +1017,75 @@ class _MainNavigationState extends State<MainNavigation> {
       return;
     }
     _windowsNotification = WindowsNotification(applicationId: 'Axis');
+    // Прописываем иконку для toast при запуске (запись в реестр для AUMID).
+    await _registerNotificationAttributionIcon();
   }
 
   Future<void> _showWindowsNotification(String title, String message) async {
     if (!Platform.isWindows) return;
     try {
+      // Маленькая иконка в углу уведомления (attribution icon) берётся из регистрации
+      // AppUserModelID 'Axis' в реестре, а не из XML. Прописываем IconUri перед показом.
+      await _registerNotificationAttributionIcon();
+
       final uniqueId = DateTime.now().millisecondsSinceEpoch.toString();
 
-      // Надёжный путь к файлу иконки: иконка должна быть file path на диске.
-      // Мы пакуем её через pubspec.yaml в flutter_assets, как это делается и для tray.
-      final iconPath = _trayIconPath('assets/axis_icon.png');
+      // Большая иконка в теле уведомления: notify.png, уменьшенный до 256px
+      // (а не 2048px мастер, иначе Windows мылит при ужатии).
+      final iconPath = _trayIconPath('assets/notify_icon.png');
+      final logo = iconPath == null
+          ? ''
+          // Квадратный appLogoOverride без hint-crop="circle" — без кругового сглаживания, резче.
+          : '<image placement="appLogoOverride" src="${_xmlEscape(iconPath)}"/>';
 
-      final notificationMessage = NotificationMessage.fromPluginTemplate(
-        uniqueId,
-        title,
-        message,
-        image: iconPath,
-      );
+      final template = '''
+<?xml version="1.0" encoding="utf-8"?>
+<toast activationType="protocol">
+  <visual>
+    <binding template="ToastGeneric">
+      <text id="1">${_xmlEscape(title)}</text>
+      <text id="2">${_xmlEscape(message)}</text>
+      $logo
+    </binding>
+  </visual>
+</toast>
+''';
 
-      await _windowsNotification.showNotificationPluginTemplate(notificationMessage);
+      final notificationMessage = NotificationMessage.fromCustomTemplate(uniqueId);
+      await _windowsNotification.showNotificationCustomTemplate(notificationMessage, template);
     } catch (e) {
       debugPrint('Windows notification error: $e');
     }
   }
+
+  /// Прописывает иконку приложения для toast-уведомлений (угловая attribution icon).
+  /// Без этой записи в реестре Windows не показывает иконку в углу для AUMID без ярлыка.
+  /// Иконка статичная: переключать её по состоянию ненадёжно из-за агрессивного кэша
+  /// иконок уведомлений Windows (после смены значения нужен сброс кэша).
+  Future<void> _registerNotificationAttributionIcon() async {
+    if (!Platform.isWindows) return;
+    try {
+      final iconPath = _trayIconPath('assets/tray_connected.png');
+      if (iconPath == null) return;
+      // IconUri требует валидного пути. _trayIconPath отдаёт смешанные слэши
+      // (C:\...\assets/icon.png) — Windows такой путь игнорирует. Приводим всё к '\'
+      // как в документации (IconUri = C:\icon.png).
+      final iconUri = iconPath.replaceAll('/', '\\');
+      const keyPath = r'HKCU\Software\Classes\AppUserModelId\Axis';
+      await Process.run('reg', ['add', keyPath, '/v', 'DisplayName', '/t', 'REG_SZ', '/d', 'Axis', '/f']);
+      await Process.run('reg', ['add', keyPath, '/v', 'IconUri', '/t', 'REG_SZ', '/d', iconUri, '/f']);
+      await Process.run('reg', ['add', keyPath, '/v', 'IconBackgroundColor', '/t', 'REG_SZ', '/d', '#00000000', '/f']);
+    } catch (e) {
+      debugPrint('Notification attribution icon register error: $e');
+    }
+  }
+
+  String _xmlEscape(String s) => s
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&apos;');
 
   Future<void> _updateTrayMenu() async {
     final Menu menu = Menu();
@@ -1038,19 +1144,24 @@ class _MainNavigationState extends State<MainNavigation> {
       }
       if (_selectedServer == null) {
         final available = await _coreService.getServers();
-        if (available.isNotEmpty) {
-          final fallbackServer = available.first;
-          final selected = await _coreService.selectServer(fallbackServer);
-          if (!selected) {
-            if (!mounted) return;
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(s.unsupportedServerFormat)),
-            );
-            return;
-          }
-          _selectedServer = fallbackServer;
-          _emitConfigChange({...widget.config, 'selectedServer': fallbackServer});
+        if (available.isEmpty) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(s.noServersAdded)),
+          );
+          return;
         }
+        final fallbackServer = available.first;
+        final selected = await _coreService.selectServer(fallbackServer);
+        if (!selected) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(s.unsupportedServerFormat)),
+          );
+          return;
+        }
+        _selectedServer = fallbackServer;
+        _emitConfigChange({...widget.config, 'selectedServer': fallbackServer});
       }
       setState(() => _isConnected = true);
       final started = await _coreService.initAndStart();
@@ -1458,6 +1569,29 @@ class _MainNavigationState extends State<MainNavigation> {
               future: customFuture,
               builder: (context, customSnap) {
                 final customList = (customSnap.data ?? const <ServerEntry>[]).where((e) => e.source == 'custom').toList();
+                final hasAnyServers = customList.isNotEmpty || groups.any((g) => g.servers.isNotEmpty);
+                if (!hasAnyServers) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.cloud_off_rounded, size: 56, color: cs.onSurface.withValues(alpha: 0.3)),
+                          const SizedBox(height: 16),
+                          Text(
+                            s.noServersHint,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: cs.onSurface.withValues(alpha: 0.4),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }
                 return ListView(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                   children: [
@@ -1470,31 +1604,39 @@ class _MainNavigationState extends State<MainNavigation> {
                       if (_sortByPing) {
                         list.sort((a, b) => (_pingByServer[a.name] ?? 999999).compareTo(_pingByServer[b.name] ?? 999999));
                       }
-                      return Card(
-                        elevation: 2,
-                        clipBehavior: Clip.antiAlias,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: CustomExpansionTile(
-                          title: Text(group.name),
-                          subtitle: Text('${list.length} ${s.proxiesCount}'),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(
-                                icon: const Icon(Icons.sync_rounded),
-                                tooltip: s.syncSubscription,
-                                onPressed: () => _refreshSubscription(group),
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.edit),
-                                tooltip: s.renameSubscription,
-                                onPressed: () => _showRenameSubscriptionDialog(group),
-                              ),
-                            ],
+                      return GestureDetector(
+                        onSecondaryTapDown: (details) => _showSubscriptionContextMenu(group, details.globalPosition),
+                        child: Card(
+                          elevation: 2,
+                          clipBehavior: Clip.antiAlias,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(20),
                           ),
-                          children: list.map((entry) => _proxyTile(entry, cs)).toList(),
+                          child: CustomExpansionTile(
+                            title: Text(group.name),
+                            subtitle: Text('${list.length} ${s.proxiesCount}'),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.sync_rounded),
+                                  tooltip: s.syncSubscription,
+                                  onPressed: () => _refreshSubscription(group),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.edit),
+                                  tooltip: s.renameSubscription,
+                                  onPressed: () => _showRenameSubscriptionDialog(group),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.delete_outline_rounded),
+                                  tooltip: s.deleteSubscription,
+                                  onPressed: () => _deleteSubscription(group),
+                                ),
+                              ],
+                            ),
+                            children: list.map((entry) => _proxyTile(entry, cs)).toList(),
+                          ),
                         ),
                       );
                     }),
@@ -1803,7 +1945,7 @@ class _MainNavigationState extends State<MainNavigation> {
           child: Icon(Icons.info_outline, color: cs.primary),
         ),
         title: Text(s.about, style: const TextStyle(fontWeight: FontWeight.w500)),
-        subtitle: const Text("Axis v1.4"),
+        subtitle: const Text("Axis v1.5.0"),
         trailing: Icon(Icons.open_in_new_rounded, size: 22, color: cs.onSurfaceVariant),
         onTap: () async {
           final Uri url = Uri.parse('https://github.com/swzxu/axis');

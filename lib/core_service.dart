@@ -73,6 +73,11 @@ class CoreService {
   static const String modeTun = 'TUN';
   static const String modeProxy = 'Просто прокси';
 
+  // Многие панели (Remnawave, Marzban и т.п.) отдают подписку только узнаваемым
+  // клиентам, а на неизвестный UA возвращают 403. С этим UA панель отдаёт
+  // base64-список vless://-ссылок (который мы умеем парсить) и заголовок Profile-Title.
+  static const Map<String, String> _subscriptionHeaders = {'User-Agent': 'v2rayN/6.45'};
+
   String currentMode = modeTun;
   List<Map<String, String>> _serversData = []; 
   List<Map<String, dynamic>> _subscriptions = [];
@@ -536,7 +541,7 @@ tun:
       return const SubscriptionUpdateResult(success: false);
     }
     try {
-      final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 15));
+      final response = await http.get(Uri.parse(url), headers: _subscriptionHeaders).timeout(const Duration(seconds: 15));
       if (response.statusCode == 200 && response.body.isNotEmpty) {
         final file = await _subFile;
         await file.writeAsString(response.body.trim());
@@ -586,7 +591,7 @@ tun:
       return const SubscriptionUpdateResult(success: false);
     }
     try {
-      final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 20));
+      final response = await http.get(Uri.parse(url), headers: _subscriptionHeaders).timeout(const Duration(seconds: 20));
       if (response.statusCode != 200 || response.body.isEmpty) {
         return const SubscriptionUpdateResult(success: false);
       }
@@ -623,6 +628,16 @@ tun:
     await _saveSubscriptions();
   }
 
+  Future<bool> deleteSubscription(String id) async {
+    await _loadSubscriptions();
+    final before = _subscriptions.length;
+    _subscriptions.removeWhere((sub) => (sub['id'] ?? '').toString() == id);
+    if (_subscriptions.length == before) return false;
+    await _saveSubscriptions();
+    await getServerEntries();
+    return true;
+  }
+
   Future<SubscriptionUpdateResult> refreshSubscription(String id) async {
     await _loadSubscriptions();
     final index = _subscriptions.indexWhere((sub) => (sub['id'] ?? '').toString() == id);
@@ -633,7 +648,7 @@ tun:
       return const SubscriptionUpdateResult(success: false);
     }
     try {
-      final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 20));
+      final response = await http.get(Uri.parse(url), headers: _subscriptionHeaders).timeout(const Duration(seconds: 20));
       if (response.statusCode != 200 || response.body.isEmpty) {
         return const SubscriptionUpdateResult(success: false);
       }
@@ -741,17 +756,35 @@ tun:
 
   String _extractSubscriptionName(http.Response response, String sourceUrl) {
     final profileTitle = response.headers['profile-title'];
-    if (profileTitle != null && profileTitle.isNotEmpty) {
+    if (profileTitle != null && profileTitle.trim().isNotEmpty) {
+      var value = profileTitle.trim();
+      // Панели присылают title либо как сырой base64, либо с префиксом "base64:".
+      if (value.toLowerCase().startsWith('base64:')) {
+        value = value.substring(7).trim();
+        try {
+          return utf8.decode(base64.decode(base64.normalize(value)));
+        } catch (_) {
+          return value;
+        }
+      }
+      // Без префикса: пробуем как base64, иначе берём как есть (plain title).
       try {
-        return utf8.decode(base64.decode(base64.normalize(profileTitle)));
+        return utf8.decode(base64.decode(base64.normalize(value)));
       } catch (_) {
-        return profileTitle;
+        return value;
       }
     }
     final contentDisposition = response.headers['content-disposition'] ?? '';
-    final fileNameMatch = RegExp(r'filename="?([^"]+)"?', caseSensitive: false).firstMatch(contentDisposition);
+    final fileNameMatch = RegExp(r'filename="?([^";]+)"?', caseSensitive: false).firstMatch(contentDisposition);
     if (fileNameMatch != null) {
-      return fileNameMatch.group(1)!;
+      final name = fileNameMatch.group(1)!.trim();
+      if (name.isNotEmpty) {
+        try {
+          return Uri.decodeComponent(name);
+        } catch (_) {
+          return name;
+        }
+      }
     }
     try {
       return Uri.parse(sourceUrl).host;
