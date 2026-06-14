@@ -1,6 +1,6 @@
 # ![Axis](https://raw.githubusercontent.com/swzxu/axis-branding/refs/heads/main/banner.png)
 
-**Axis** is a lightweight and intuitive Flutter-based proxy client powered by the **Mihomo** (ClashMeta) core.
+### **Axis** is a lightweight and intuitive Flutter-based proxy client powered by the **Mihomo** (ClashMeta) core.
 
 ![Home page](https://raw.githubusercontent.com/swzxu/axis-branding/refs/heads/main/Axis_b1.png)
 <p align="center">
