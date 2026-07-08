@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:http/http.dart' as http;
+import 'app_paths.dart';
 
 class SubscriptionUpdateResult {
   final bool success;
@@ -90,12 +91,11 @@ class CoreService {
 
   String? get selectedServerName => _selectedServerName;
 
+  // Директория данных выбирается централизованно (обычная %LOCALAPPDATA%\Axis
+  // или, при запуске с -portable, папка рядом с программой).
   Future<String> get _axisPath async {
-    final localAppData = Platform.environment['LOCALAPPDATA'] ?? "";
-    final path = p.join(localAppData, 'Axis');
-    final dir = Directory(path);
-    if (!await dir.exists()) await dir.create(recursive: true);
-    return path;
+    final dir = await AppPaths.dataDir();
+    return dir.path;
   }
 
   Future<File> get _subFile async {
@@ -723,7 +723,10 @@ tun:
     final exePath = Platform.resolvedExecutable;
     final key = r'HKCU\Software\Microsoft\Windows\CurrentVersion\Run';
     if (enabled) {
-      await Process.run('reg', ['add', key, '/v', 'Axis', '/t', 'REG_SZ', '/d', exePath, '/f']);
+      // Путь в кавычках (может содержать пробелы) + проброс -portable, чтобы
+      // автозапуск сохранял портативный режим и читал конфиги из папки программы.
+      final command = ['"$exePath"', ...AppPaths.launchArgs].join(' ');
+      await Process.run('reg', ['add', key, '/v', 'Axis', '/t', 'REG_SZ', '/d', command, '/f']);
     } else {
       await Process.run('reg', ['delete', key, '/v', 'Axis', '/f']);
     }
@@ -745,7 +748,12 @@ tun:
     if (isAdmin) return true;
     try {
       final exePath = Platform.resolvedExecutable;
-      final command = 'Start-Process -FilePath "$exePath" -Verb RunAs';
+      // Пробрасываем -portable в админ-копию, иначе перезапущенный под UAC
+      // процесс потеряет портативный режим и уйдёт читать конфиги в %LOCALAPPDATA%.
+      final argList = AppPaths.launchArgs.isEmpty
+          ? ''
+          : ' -ArgumentList ${AppPaths.launchArgs.map((a) => "'$a'").join(',')}';
+      final command = 'Start-Process -FilePath "$exePath"$argList -Verb RunAs';
       await Process.run('powershell', ['-NoProfile', '-Command', command]);
       return true;
     } catch (e) {

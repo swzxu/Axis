@@ -14,9 +14,16 @@ import 'package:windows_notification/windows_notification.dart';
 import 'package:windows_notification/notification_message.dart';
 import 'localization.dart';
 import 'core_service.dart';
+import 'app_paths.dart';
 
-void main() async {
+void main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Портативный режим: если exe запущен с -portable, конфиги хранятся рядом
+  // с программой, а не в %LOCALAPPDATA%. Аргументы прокидываются из нативного
+  // раннера (windows/runner/main.cpp -> set_dart_entrypoint_arguments).
+  if (args.any(AppPaths.isPortableArg)) {
+    AppPaths.portable = true;
+  }
   runApp(const AxisApp());
 }
 
@@ -53,6 +60,9 @@ class _AxisAppState extends State<AxisApp> {
   String _hotkeyToggleConnection = '';
   String _hotkeyToggleWindow = '';
   String _routingRules = '';
+  // Путь к exe, для которого уже прописан AUMID уведомлений в реестре.
+  // Пусто = первый запуск (регистрация ещё не выполнялась).
+  String _notifyRegisteredExePath = '';
 
   @override
   void initState() {
@@ -61,10 +71,9 @@ class _AxisAppState extends State<AxisApp> {
   }
 
   Future<File> _getConfigFile() async {
-    final localPath = Platform.environment['LOCALAPPDATA'] ?? "";
-    final axisDir = Directory(p.join(localPath, 'Axis'));
-    if (!await axisDir.exists()) await axisDir.create(recursive: true);
-    return File(p.join(axisDir.path, 'config.json'));
+    // Директория данных выбирается централизованно (обычная %LOCALAPPDATA%\Axis
+    // или, при запуске с -portable, папка рядом с программой).
+    return AppPaths.file('config.json');
   }
 
   Future<void> _loadFullConfig() async {
@@ -96,6 +105,7 @@ class _AxisAppState extends State<AxisApp> {
           _hotkeyToggleConnection = data['hotkeyToggleConnection'] ?? '';
           _hotkeyToggleWindow = data['hotkeyToggleWindow'] ?? '';
           _routingRules = data['routingRules'] ?? '';
+          _notifyRegisteredExePath = data['notifyRegisteredExePath'] ?? '';
         });
         await _loadWindowsAccentColor();
       } else {
@@ -153,6 +163,7 @@ class _AxisAppState extends State<AxisApp> {
         'hotkeyToggleConnection': _hotkeyToggleConnection,
         'hotkeyToggleWindow': _hotkeyToggleWindow,
         'routingRules': _routingRules,
+        'notifyRegisteredExePath': _notifyRegisteredExePath,
       };
       await file.writeAsString(jsonEncode(data));
     } catch (e) {
@@ -345,6 +356,7 @@ class _AxisAppState extends State<AxisApp> {
           'hotkeyToggleConnection': _hotkeyToggleConnection,
           'hotkeyToggleWindow': _hotkeyToggleWindow,
           'routingRules': _routingRules,
+          'notifyRegisteredExePath': _notifyRegisteredExePath,
         },
         onConfigChange: (newConfig) {
           setState(() {
@@ -366,6 +378,7 @@ class _AxisAppState extends State<AxisApp> {
             _hotkeyToggleConnection = newConfig['hotkeyToggleConnection'] ?? _hotkeyToggleConnection;
             _hotkeyToggleWindow = newConfig['hotkeyToggleWindow'] ?? _hotkeyToggleWindow;
             _routingRules = newConfig['routingRules'] ?? _routingRules;
+            _notifyRegisteredExePath = newConfig['notifyRegisteredExePath'] ?? _notifyRegisteredExePath;
           });
           _saveFullConfig();
         },
@@ -1017,16 +1030,33 @@ class _MainNavigationState extends State<MainNavigation> {
       return;
     }
     _windowsNotification = WindowsNotification(applicationId: 'Axis');
-    // Прописываем иконку для toast при запуске (запись в реестр для AUMID).
+    // При первом запуске (или после переноса/обновления папки) определяем текущую
+    // директорию exe и прописываем AUMID-иконку в реестр. Если путь уже прописан —
+    // ничего не делаем.
+    await _ensureNotificationRegistration();
+  }
+
+  /// Регистрирует AUMID уведомлений (`HKCU\Software\Classes\AppUserModelId\Axis`)
+  /// в реестре при первом запуске и повторно, если директория приложения сменилась
+  /// (портативная папка перенесена / обновлена). Прописанный путь к exe хранится в
+  /// config.json (`notifyRegisteredExePath`); при совпадении с текущим — no-op, реестр
+  /// не трогаем.
+  Future<void> _ensureNotificationRegistration() async {
+    if (!Platform.isWindows) return;
+    final currentExe = Platform.resolvedExecutable;
+    final registeredExe = widget.config['notifyRegisteredExePath'] as String? ?? '';
+    if (registeredExe == currentExe) return;
     await _registerNotificationAttributionIcon();
+    _emitConfigChange({...widget.config, 'notifyRegisteredExePath': currentExe});
   }
 
   Future<void> _showWindowsNotification(String title, String message) async {
     if (!Platform.isWindows) return;
     try {
       // Маленькая иконка в углу уведомления (attribution icon) берётся из регистрации
-      // AppUserModelID 'Axis' в реестре, а не из XML. Прописываем IconUri перед показом.
-      await _registerNotificationAttributionIcon();
+      // AppUserModelID 'Axis' в реестре, а не из XML. Гарантируем, что запись есть
+      // (первый запуск / смена папки); при уже прописанном пути это no-op.
+      await _ensureNotificationRegistration();
 
       final uniqueId = DateTime.now().millisecondsSinceEpoch.toString();
 
@@ -1945,7 +1975,7 @@ class _MainNavigationState extends State<MainNavigation> {
           child: Icon(Icons.info_outline, color: cs.primary),
         ),
         title: Text(s.about, style: const TextStyle(fontWeight: FontWeight.w500)),
-        subtitle: const Text("Axis v1.5.0"),
+        subtitle: const Text("Axis v1.5.1"),
         trailing: Icon(Icons.open_in_new_rounded, size: 22, color: cs.onSurfaceVariant),
         onTap: () async {
           final Uri url = Uri.parse('https://github.com/swzxu/axis');
